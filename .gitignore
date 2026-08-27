@@ -1,0 +1,62 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# Environment Variables
+.env
+
+# Python Build
+build/
+dist/
+*.egg-info/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# SQLite
+*.db
+*.sqlite3
+
+# ChromaDB
+backend/chroma/
+
+# Testing
+.pytest_cache/
+.coverage
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Node (Frontend)
+frontend/node_modules/
+frontend/dist/
+
+# React
+frontend/.vite/
+
+# Temporary files
+*.tmp
+*.bak
+
+# PDF cache (optional)
+backend/data/cache/
+
+# Python bytecode
+*.pyc
