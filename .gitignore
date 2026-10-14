@@ -8,6 +8,7 @@ __pycache__/
 
 # Virtual Environment
 .venv/
+.venv-windows-backup/
 venv/
 env/
 
