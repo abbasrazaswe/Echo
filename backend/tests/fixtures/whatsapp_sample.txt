@@ -1,0 +1,5 @@
+14/10/2026, 09:00 - Messages and calls are end-to-end encrypted.
+14/10/2026, 09:01 - Ali: Shall we study Python today?
+14/10/2026, 09:02 - Sara: Yes! Let's start with functions.
+Then we can try a small project 🙂
+14/10/2026, 09:03 - Ali: <Media omitted>

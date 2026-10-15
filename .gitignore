@@ -58,6 +58,7 @@ frontend/.vite/
 
 # PDF cache (optional)
 backend/data/cache/
+backend/data/profiles/
 
 # Python bytecode
 *.pyc

@@ -8,7 +8,7 @@ require API keys, a database, or transcript files.
 From the repository root:
 
 ```sh
-cd echo-ai/backend
+cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
@@ -19,7 +19,7 @@ other projects. Activate it again whenever you open a new terminal.
 
 ## Run
 
-From `echo-ai/backend`, with the virtual environment active:
+From `backend`, with the virtual environment active:
 
 ```sh
 python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
@@ -52,3 +52,59 @@ setup. If 8001 is occupied, choose another port and update the browser URL.
 
 The health response confirms that the server can handle a request. It does not
 check an AI provider or database; those will be introduced in later checkpoints.
+
+## Second checkpoint: WhatsApp transcript parsing
+
+From `backend`, activate the virtual environment and run the fictional sample:
+
+```sh
+source .venv/bin/activate
+python -m app.parser tests/fixtures/whatsapp_sample.txt --date-order day-first --output data/profiles/default/processed/sample.json
+```
+
+Open the output JSON to inspect four records: a system notice and three messages.
+Sara's two-line message remains one record. The output folder is excluded from
+Git because real imports and derived files may contain private conversations.
+The parser refuses to overwrite an existing output; choose a fresh output path
+when running again.
+
+For your own export, put the `.txt` file in
+`data/profiles/default/raw/` and replace the sample path in the command.
+Use `--date-order month-first` for exports where `04/05/2026` means April 5.
+Use `day-first` where it means May 4. Two-digit years use Python's convention:
+00–68 mean 2000–2068, and 69–99 mean 1969–1999.
+
+Supported headers include:
+
+```text
+14/10/2026, 09:01 - Ali: Hello
+[14/10/2026, 9:01:00 PM] Ali: Hello
+```
+
+The parser supports 12- and 24-hour time, optional seconds, two- or four-digit
+years, and slash, dot, or hyphen date separators. It preserves file order,
+Unicode text, multiline content, media placeholders, and timestamped notices.
+Each record contains the original text block and source line numbers for review.
+Line endings are normalized to newlines. Timestamps have no timezone because the
+export does not provide one.
+
+Unreadable headers, invalid dates, and nonblank text before the first message
+produce errors with line numbers. An arbitrary continuation line is retained as
+message text. A pasted line that looks exactly like an export header is ambiguous
+and will begin a new record. Sender detection uses the first `: ` separator;
+names containing that separator and system notices containing it need review.
+These are common-format rules, not a guarantee for every WhatsApp locale.
+We should validate a redacted real sample before importing your full history.
+
+The parser is a command-line tool for this checkpoint; it is not connected to
+the HTTP API or a database yet.
+
+### Parser tests
+
+```sh
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+The tests exercise message boundaries, date ambiguity, Unicode, system notices,
+invalid input, JSON export, and protection against overwriting source files.
