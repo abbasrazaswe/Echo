@@ -1,7 +1,7 @@
 # Echo backend — first checkpoint
 
-This checkpoint runs a local HTTP server with a health endpoint. It does not
-require API keys, a database, or transcript files.
+Echo runs a local HTTP server, parses WhatsApp exports, and stores imported
+messages in SQLite. No AI API keys are needed for these checkpoints.
 
 ## Setup (macOS/Linux)
 
@@ -32,8 +32,8 @@ Open <http://127.0.0.1:8001/health>. The response should be:
 ```
 
 Open <http://127.0.0.1:8001/docs> to explore and call the endpoint interactively.
-Stop the server with **Ctrl+C**. A request to `/` returns 404 because we have
-only defined `/health` so far.
+Stop the server with **Ctrl+C**. A request to `/` returns 404 because no root
+page is defined; use `/health` or `/docs`.
 
 We use port 8001 because another local process was already using 8000 during
 setup. If 8001 is occupied, choose another port and update the browser URL.
@@ -96,8 +96,8 @@ names containing that separator and system notices containing it need review.
 These are common-format rules, not a guarantee for every WhatsApp locale.
 We should validate a redacted real sample before importing your full history.
 
-The parser is a command-line tool for this checkpoint; it is not connected to
-the HTTP API or a database yet.
+The parser can run independently from the terminal. The third checkpoint also
+uses it when importing transcript text through the HTTP API.
 
 ### Parser tests
 
@@ -108,3 +108,69 @@ python -m pytest -q
 
 The tests exercise message boundaries, date ambiguity, Unicode, system notices,
 invalid input, JSON export, and protection against overwriting source files.
+
+## Third checkpoint: persistent conversations
+
+Install the updated requirements and restart the server before trying these
+endpoints. The SQLite file is created automatically at
+`backend/data/profiles/echo.db`, independent of the launch directory. This
+checkpoint uses that fixed local path; `.env` configuration is not loaded yet.
+One database holds all profiles, with queries scoped to the selected profile.
+The database and imported data are excluded from Git.
+
+### Try it in the interactive docs
+
+1. Open <http://127.0.0.1:8001/docs>.
+2. Expand `POST /profiles`, click **Try it out**, and submit
+   `{"name": "Learning profile"}`. Copy the returned `id`.
+3. Expand `POST /profiles/{profile_id}/imports`. Paste the profile ID into the
+   path field and submit this body:
+
+   ```json
+   {
+     "title": "Python discussion",
+     "date_order": "day-first",
+     "transcript": "14/10/2026, 09:01 - Ali: Shall we study Python?\n14/10/2026, 09:02 - Sara: Yes, let's start with functions."
+   }
+   ```
+
+4. Use `GET /profiles/{profile_id}/messages` with that profile ID. Set `q` to
+   `functions` to find Sara's message. Leave optional fields unset for all messages.
+5. Repeat the import: HTTP **409** means it was already saved. No duplicates
+   are added. Restart the server and browse again to confirm the data persists.
+6. Use the conversation `id` returned by the import to call
+   `GET /profiles/{profile_id}/conversations/{conversation_id}/export`.
+   It returns all records as JSON, including stable message IDs and source text.
+
+### What the database does
+
+- A **profile** groups a dataset. Profile names need not be unique; IDs are unique.
+- A **conversation** represents one import, with its title, date order, source
+  fingerprint, message count, and time range.
+- A **message** stores the parsed fields plus a stable ID and conversation ID.
+- A **transaction** commits the conversation and all its messages together;
+  any failure rolls the import back.
+- A **unique constraint** prevents the same source fingerprint from being
+  imported twice into a profile, including under concurrent requests.
+
+Duplicate detection ignores BOM and newline-style differences. It detects
+repeated whole transcripts, not partially overlapping exports. Changing the
+date-order selection does not bypass duplicate detection; there is no correction
+or deletion API yet. Source messages have no edit endpoint.
+
+`GET /profiles` lists profiles, and `GET /profiles/{profile_id}/conversations`
+lists their imports. Message browsing supports `limit` (1–200), `offset`, an
+optional `conversation_id`, and `q` for literal substring search in message text.
+SQLite's default case-insensitive matching handles ASCII letters; this is not
+semantic or multilingual case-folded search. Within each conversation, messages
+are returned in original export order. Export returns a full conversation and
+is intended for small local datasets at this stage.
+
+Invalid input returns HTTP 422; missing profiles/conversations return 404.
+Import accepts transcript text in JSON, up to 2,000,000 characters. File upload,
+authentication, and remote deployment are later work. Keep the server bound to
+`127.0.0.1` until access controls are added. Historical imports remain separate
+from future live chat memory; live memory is not implemented yet.
+
+Run `python -m pytest -q` for the parser and API/storage checks, including
+restart persistence, profile isolation, rollback, duplicates, and export fidelity.
