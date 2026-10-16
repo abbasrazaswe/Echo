@@ -5,23 +5,25 @@ from fastapi import FastAPI
 
 from app.api import router
 from app.database import Database
+from app.retrieval import EmbeddingProvider, RetrievalService
 
 
 DEFAULT_DATABASE = Path(__file__).resolve().parents[1] / "data/profiles/echo.db"
 
 
-def create_app(database_path: Path = DEFAULT_DATABASE) -> FastAPI:
+def create_app(database_path: Path = DEFAULT_DATABASE, *, embedder: EmbeddingProvider | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         database = Database(database_path)
         database.initialize()
         application.state.database = database
+        application.state.retrieval = RetrievalService(database, embedder)
         try:
             yield
         finally:
             database.engine.dispose()
 
-    application = FastAPI(title="Echo API", version="0.2.0", lifespan=lifespan)
+    application = FastAPI(title="Echo API", version="0.3.0", lifespan=lifespan)
     application.include_router(router)
 
     @application.get("/health")

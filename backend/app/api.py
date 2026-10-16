@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.database import Conversation, Message, Profile
 from app.parser.whatsapp import DateOrder, MessageRecord, ParseError, parse_whatsapp
+from app.retrieval import IndexRequired, RetrievalUnavailable
 
 
 router = APIRouter()
@@ -60,6 +61,32 @@ class MessagePage(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class IndexOutput(BaseModel):
+    profile_id: str
+    chunks: int
+    model: str
+
+
+class SourceSpan(BaseModel):
+    message_id: str
+    start_char: int
+    end_char: int
+
+
+class SearchHit(BaseModel):
+    chunk_id: str
+    conversation_id: str
+    text: str
+    score: float
+    spans: list[SourceSpan]
+    messages: list[MessageOutput]
+
+
+class SearchOutput(BaseModel):
+    items: list[SearchHit]
+    model: str
 
 
 def require_profile(session: Session, profile_id: str) -> Profile:
@@ -163,3 +190,34 @@ def export_conversation(profile_id: str, conversation_id: str, session: SessionD
     return session.scalars(select(Message).where(
         Message.conversation_id == conversation_id,
     ).order_by(Message.sequence_number)).all()
+
+
+@router.post("/profiles/{profile_id}/memories/index", response_model=IndexOutput)
+def index_memories(profile_id: str, request: Request, session: SessionDependency):
+    """Build/rebuild a semantic snapshot from the profile's imported records."""
+    require_profile(session, profile_id)
+    try:
+        return request.app.state.retrieval.build(profile_id)
+    except IndexRequired as error:
+        raise HTTPException(409, str(error)) from error
+    except RetrievalUnavailable as error:
+        raise HTTPException(503, str(error)) from error
+
+
+@router.get("/profiles/{profile_id}/memories/search", response_model=SearchOutput)
+def search_memories(
+    profile_id: str, request: Request, session: SessionDependency,
+    q: str = Query(min_length=1, max_length=220),
+    limit: int = Query(default=5, ge=1, le=20),
+    min_score: float = Query(default=0.2, ge=0, le=1),
+):
+    """Rank passages by meaning. Similarity scores are not factual confidence."""
+    require_profile(session, profile_id)
+    if not q.strip():
+        raise HTTPException(422, "Search query cannot be blank")
+    try:
+        return request.app.state.retrieval.search(profile_id, q.strip(), limit, min_score)
+    except IndexRequired as error:
+        raise HTTPException(409, str(error)) from error
+    except RetrievalUnavailable as error:
+        raise HTTPException(503, str(error)) from error

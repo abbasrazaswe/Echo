@@ -70,3 +70,14 @@ class Database:
 
     def initialize(self) -> None:
         Base.metadata.create_all(self.engine)
+
+
+class SemanticIndex(Base):
+    """Points to a fully built vector snapshot; original records stay in SQLite."""
+
+    __tablename__ = "semantic_indexes"
+    profile_id: Mapped[str] = mapped_column(ForeignKey("profiles.id"), primary_key=True)
+    collection_name: Mapped[str]
+    fingerprint: Mapped[str]
+    model: Mapped[str]
+    chunk_count: Mapped[int]

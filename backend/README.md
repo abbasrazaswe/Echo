@@ -1,7 +1,8 @@
 # Echo backend — development walkthrough
 
-Echo runs a local HTTP server, parses WhatsApp exports, and stores imported
-messages in SQLite. No AI API keys are needed for these checkpoints.
+Echo runs a local HTTP server, parses WhatsApp exports, stores imported
+messages in SQLite, and retrieves passages by meaning with local embeddings.
+No AI API keys are needed for these checkpoints.
 
 ## Setup (macOS/Linux)
 
@@ -175,3 +176,74 @@ from future live chat memory; live memory is not implemented yet.
 
 Run `python -m pytest -q` for the parser and API/storage checks, including
 restart persistence, profile isolation, rollback, duplicates, and export fidelity.
+
+## Fourth checkpoint: semantic retrieval
+
+Keyword search matches characters in a message. Semantic retrieval turns both
+passages and questions into **embeddings** (numeric vectors), then ranks nearby
+vectors in ChromaDB. It returns historical passages, not a generated AI reply.
+
+Install the updated `requirements.txt` and restart the server. In `/docs`:
+
+1. Import one or more conversations into a profile.
+2. Run `POST /profiles/{profile_id}/memories/index` for that profile.
+3. Run `GET /profiles/{profile_id}/memories/search` with a question in `q`, such
+   as `What are our plans for learning to code?` for the Python sample.
+4. Inspect each hit's `text`, `score`, `messages`, and `spans`. A span points
+   to a message ID and zero-based, end-exclusive character offsets in its text.
+   Original source line numbers remain available in the returned messages.
+
+Search accepts `q` (1–220 characters, nonblank), `limit` (1–20, default 5), and
+`min_score` (0–1, default 0.2). Score is cosine similarity clipped to 0–1;
+it is not a probability or factual confidence. A stricter threshold may remove
+weak results, including relevant ones. Semantic search does not replace checking
+the retrieved text before making historical claims.
+
+### Index and model lifecycle
+
+- SQLite messages remain authoritative. Embedding vectors are stored separately
+  in `backend/data/profiles/chroma/`, with a snapshot pointer in SQLite.
+- Each chunk groups up to three nearby messages within one conversation and is
+  bounded to 220 characters, including speaker labels. Long messages split into
+  adjacent segments with source offsets. System notices and recognised media-only
+  placeholders are excluded; media contents are not understood.
+- The embedding interface allows another provider later. This version uses
+  Chroma's ONNX `all-MiniLM-L6-v2` model with short inputs and batches of 32.
+  It is primarily an English model; multilingual retrieval quality is unverified.
+- The first nonempty index build downloads the model archive (about 79 MB).
+  Files are cached at `backend/data/profiles/models/all-MiniLM-L6-v2/`.
+  No transcript text is sent to an embedding API. Chroma telemetry is disabled.
+- The model and Chroma client load only when needed. Normal imports, keyword
+  search, and health checks work without downloading a model.
+- Index builds are explicit and synchronous. A complete new snapshot is published
+  only after all embedding batches are saved. A failed build leaves the previous
+  snapshot selected; partial vector data is cleaned up on a best-effort basis.
+- Every rebuild reads the source records again. Adding an import makes the index
+  stale. Missing/stale indexes or changed embedding models return 409 until rebuilt.
+  A failure to load the model or vector store returns 503, with details in server logs.
+- An empty or system-only profile can be indexed and returns no hits without a
+  model download. Profile IDs scope index contents and returned source records.
+- Successful older snapshots are retained so concurrent readers can finish.
+  Automatic cache pruning is not implemented; repeated rebuilds consume disk.
+  The index is derived data and can be rebuilt from SQLite. Do not delete the
+  source database when clearing vector/model caches.
+
+If a slow connection interrupts the model download, indexing returns 503. Retry
+after checking connectivity; the model archive is checksum-verified by Chroma.
+Keep this service on localhost: authentication and background indexing jobs are
+not part of this checkpoint.
+
+### Verify real-model ranking
+
+```sh
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+python -m scripts.evaluate_retrieval
+```
+
+The default test suite uses fake embeddings to test retrieval mechanics without
+network access. The separate evaluation uses the real model, fictional restaurant,
+airport, and programming conversations, and three paraphrased questions. It uses
+a temporary database while retaining the local model cache. Passing those three
+cases is a smoke check; representative conversation/language evaluation remains
+necessary before relying on retrieval for generated answers.
