@@ -1,4 +1,4 @@
-# Echo backend — first checkpoint
+# Echo backend — development walkthrough
 
 Echo runs a local HTTP server, parses WhatsApp exports, and stores imported
 messages in SQLite. No AI API keys are needed for these checkpoints.
@@ -51,7 +51,8 @@ setup. If 8001 is occupied, choose another port and update the browser URL.
 - `127.0.0.1` makes the server accessible only on this computer.
 
 The health response confirms that the server can handle a request. It does not
-check an AI provider or database; those will be introduced in later checkpoints.
+query the database or check an AI provider. Database storage is covered in the
+third checkpoint below; AI integration is planned for a later milestone.
 
 ## Second checkpoint: WhatsApp transcript parsing
 
