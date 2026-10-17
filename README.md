@@ -7,7 +7,9 @@ conversational style through retrieval-augmented generation (RAG).
 **Current stage:** a working local backend that parses WhatsApp text exports,
 stores conversations in SQLite, and supports message browsing, keyword search,
 semantic retrieval, reviewable summaries and references, and JSON export.
-AI-generated replies and the frontend are still planned.
+The grounded chat endpoint is implemented with an OpenAI adapter; provider behavior
+is tested with mocked HTTP responses. A live hosted-model evaluation and the
+frontend are still pending.
 
 ## Progress
 
@@ -18,18 +20,20 @@ AI-generated replies and the frontend are still planned.
 | Structured storage | Implemented and tested | Profiles, transactional imports, SQLite persistence, duplicate protection, pagination, keyword search, conversation export |
 | Semantic retrieval | Implemented and smoke-evaluated | Local embeddings, bounded context chunks, persistent ChromaDB indexes, source-linked results, stale-index detection |
 | Summaries and references | Implemented with local rules | Extractive segment summaries, participant labels, candidate topics/events, source inspection, correction and review |
-| Grounded AI replies | Next | LLM integration using retrieved evidence and honest uncertainty |
-| Conversation continuity | Planned | Session history, follow-ups, separate live memory |
+| Grounded AI replies | Implemented; provider tested with mocks | Responses API adapter, bounded evidence/history, exact-quote citation checks, uncertainty and provider failure handling |
+| Conversation continuity | Next | Persistent sessions, follow-ups, separate live memory |
 | Style profiles | Planned | Configurable vocabulary, punctuation, and conversational patterns |
 | Web interface | Planned | React chat, transcript browsing, memory inspection |
 | Deployment readiness | Planned | Authentication, access controls, operational documentation |
 
-The latest verified suite has **68 passing tests**, covering parsing, API
+The latest verified suite has **100 passing tests**, covering parsing, API
 validation, profile isolation, persistence after restart, transaction rollback,
 duplicate detection, search, and export fidelity. Retrieval tests also cover
 chunk bounds, provenance, model changes, incomplete builds, and stale indexes.
 Artifact tests cover source links, segment boundaries, profile isolation,
 correction validation, revision conflicts, atomic generation, and review persistence.
+Chat tests cover prompt boundaries, unsupported questions, quote/source validation,
+profile isolation, provider retries, rate limits, refusals, and configuration loading.
 The import/search/export flow has also been checked against the running HTTP server.
 
 ## Run locally
@@ -48,14 +52,17 @@ python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
 - [Interactive API docs](http://127.0.0.1:8001/docs) let you create profiles,
   import transcripts, browse messages, and export conversations.
 
-Stop the server with **Ctrl+C**. No AI API key is needed for the current features.
+Stop the server with **Ctrl+C**. Imports, search, and artifact review need no API key.
+Model-generated chat replies require local OpenAI configuration; see below.
 The application creates its SQLite database automatically at
 `backend/data/profiles/echo.db`. Configuration currently uses that fixed local
-path; the `.env` template is not loaded by the application yet.
+path. Startup loads the LLM settings from `backend/.env`; process environment
+variables take precedence. Database and embedding paths remain fixed.
 Semantic retrieval uses a local `all-MiniLM-L6-v2` ONNX embedding model and
 ChromaDB. The first nonempty index build downloads the model (about 79 MB);
 subsequent builds and searches can run offline with the cached files. Message
-text is processed locally. Chroma's anonymized telemetry is disabled.
+text is embedded locally. Chroma's anonymized telemetry is disabled. Chat sends
+selected context to OpenAI when configured.
 
 ## Try the current workflow
 
@@ -89,6 +96,70 @@ text is processed locally. Chroma's anonymized telemetry is disabled.
 9. Copy an artifact ID into `GET /profiles/{profile_id}/artifacts/{artifact_id}`
    to inspect the source messages. Use PATCH on the same path to confirm,
    correct, or reject it. See the review example below.
+10. After configuring the model, use `POST /chat` with the profile ID and a question
+    to generate a reply with validated source quotes.
+
+## Grounded chat
+
+Create or edit `backend/.env` using [the configuration template](backend/.env.example):
+
+```env
+LLM_PROVIDER=openai
+OPENAI_API_KEY=your-local-key
+LLM_MODEL=your-available-model
+LLM_TIMEOUT_SECONDS=20
+LLM_MAX_OUTPUT_TOKENS=1600
+```
+
+Choose a model available to your API project that supports the Responses API and
+[Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
+The model is explicitly configured; Echo does not select one automatically.
+Restart the server after changing settings. Never commit the real `.env` file.
+
+Import conversations and build the selected profile's semantic index, then use:
+
+```json
+{
+  "profile_id": "your-profile-id",
+  "message": "What were our plans for learning to code?",
+  "recent_turns": [],
+  "min_score": 0.3
+}
+```
+
+`POST /chat` retrieves up to five passages and returns `answer`, `status`,
+`citations`, the retrieved `context`, any reviewed `summary_ids` used as hints,
+`history_trimmed`, and the provider `model`. Inspect the source messages and
+character spans in `context` to assess the evidence.
+
+- No passages above the threshold: return `insufficient_evidence` without a model call.
+- Retrieved passages do not answer the question: the model can signal insufficient
+  evidence, which produces a fixed uncertainty reply without citations.
+- An answered reply must cite retrieved message IDs with exact quotes from the
+  excerpts sent to the model. Invalid or missing citations return 502.
+- Citation checks establish provenance, not that every generated claim follows
+  logically from the quoted text. Retrieval and answer quality still need evaluation.
+
+The question is limited to 220 characters to match the current retrieval inputs.
+You may supply up to eight recent user/assistant turns, each up to 1,000 characters;
+only the latest complete turns fitting 4,000 content characters are forwarded.
+Recent turns are client-provided context, not historical evidence. Up to three
+reviewed summary hints are included when all their source IDs occur in retrieval.
+Unreviewed/rejected artifacts and people/event/topic candidates are not forwarded.
+
+**External processing:** configured chat sends the question, bounded recent turns,
+retrieved excerpts, speaker labels/timestamps, and applicable reviewed summary hints
+to OpenAI. Requests use `store:false`; this is not a claim of zero data retention.
+Source records and local vector indexes remain on your machine.
+
+Provider timeouts, connection failures, and 5xx errors receive at most one retry.
+Rate limits return 429 with `Retry-After`; exhausted timeouts return 504;
+configuration/connectivity/provider outages return 503. Refusals return `refused`.
+Chat is currently stateless: it does not save sessions, replies, or new memories.
+
+**Verification:** provider requests/responses are mocked in tests. No live OpenAI
+call has been made for this checkpoint. A successful mocked test is not evidence
+of hosted-model access, output quality, or resistance to all prompt injections.
 
 ## Summaries and reference review
 
@@ -128,8 +199,8 @@ returns HTTP 409 so you can reload before editing again.
 Original generated text and citations remain available alongside the latest
 reviewed version. Regeneration refreshes pending records and preserves confirmed,
 corrected, and rejected records. It never changes imported messages. Full edit
-history, automatic entity resolution, AI-written summaries, and using these
-artifacts in generated replies are later work.
+history, automatic entity resolution, and AI-written summaries are later work.
+Reviewed summaries can now be supplied to chat as hints alongside source evidence.
 
 The flow so far is:
 
@@ -139,6 +210,8 @@ WhatsApp text → parser → validated messages → SQLite → browse/search/exp
                                       chunks → embeddings → ChromaDB
                                                                ↓
                                  question → embedding → ranked source passages
+                                                                  ↓
+                                      bounded prompt → LLM → citation validation → reply
 ```
 
 For standalone parsing, run this from `backend` with the virtual environment active:
@@ -167,6 +240,7 @@ the parser refuses to overwrite files.
 | POST | `/profiles/{profile_id}/artifacts/generate` | Generate summaries/references, optionally scoped by `conversation_id` |
 | GET | `/profiles/{profile_id}/artifacts` | Browse using `kind`, `status`, `conversation_id`, `limit`, and `offset` |
 | GET / PATCH | `/profiles/{profile_id}/artifacts/{artifact_id}` | Inspect evidence or review/correct an artifact |
+| POST | `/chat` | Generate a reply using retrieved source passages and optional recent turns |
 
 ## Tests
 
@@ -178,6 +252,8 @@ python -m pytest -q
 ```
 
 Tests use temporary databases and fictional transcripts.
+Provider tests use mocked HTTP responses and fictional credentials; they make no
+OpenAI calls. No live provider key is required to run the suite.
 Automated retrieval tests use deterministic test embeddings and real ChromaDB;
 they do not download a model. To evaluate the actual local embedding model on
 three fictional paraphrase queries, run this separately from `backend`:
@@ -205,6 +281,9 @@ Echo/
 │   │   ├── api.py               # Profiles, imports, browsing, and export
 │   │   ├── artifact_api.py      # Artifact generation, inspection, and review
 │   │   ├── artifacts.py         # Extractive summaries and reference rules
+│   │   ├── chat.py              # Prompt context and citation validation
+│   │   ├── llm.py               # Provider interface, OpenAI adapter, settings
+│   │   ├── prompts/             # Grounding instructions
 │   │   ├── database.py          # SQLAlchemy schema and SQLite connections
 │   │   ├── retrieval.py         # Chunking, embeddings, and vector snapshots
 │   │   └── parser/              # WhatsApp parser and command-line entry point
@@ -220,8 +299,9 @@ Echo/
 
 ## Current limits and next steps
 
-- Keyword search, semantic retrieval, and artifact review are available. **Next:
-  LLM integration and RAG** to generate replies supported by retrieved evidence.
+- The grounded chat API is implemented with mocked provider coverage. **Next:
+  persistent conversation sessions and separate live memory**. Hosted-model
+  evaluation remains pending until credentials are configured locally.
 - Semantic results rank similarity; scores are not evidence that an answer is
   true. `min_score` can suppress weak matches but cannot reliably detect every
   question without an answer. Validate retrieval on your own examples before RAG.

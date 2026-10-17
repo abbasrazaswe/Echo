@@ -3,7 +3,8 @@
 Echo runs a local HTTP server, parses WhatsApp exports, stores imported
 messages in SQLite, and retrieves passages by meaning with local embeddings.
 It also generates reviewable extractive summaries and reference candidates.
-No AI API keys are needed for these checkpoints.
+These features run locally without an API key. The sixth checkpoint adds
+provider-backed grounded chat, which requires local configuration for real replies.
 
 ## Setup (macOS/Linux)
 
@@ -54,7 +55,7 @@ setup. If 8001 is occupied, choose another port and update the browser URL.
 
 The health response confirms that the server can handle a request. It does not
 query the database or check an AI provider. Database storage is covered in the
-third checkpoint below; AI integration is planned for a later milestone.
+third checkpoint below; the sixth checkpoint covers the separate chat provider.
 
 ## Second checkpoint: WhatsApp transcript parsing
 
@@ -117,7 +118,8 @@ invalid input, JSON export, and protection against overwriting source files.
 Install the updated requirements and restart the server before trying these
 endpoints. The SQLite file is created automatically at
 `backend/data/profiles/echo.db`, independent of the launch directory. This
-checkpoint uses that fixed local path; `.env` configuration is not loaded yet.
+checkpoint uses that fixed local path. Startup now loads LLM configuration from
+`backend/.env`; database and embedding paths remain fixed.
 One database holds all profiles, with queries scoped to the selected profile.
 The database and imported data are excluded from Git.
 
@@ -331,7 +333,110 @@ Generation is synchronous and transactional. Failures roll back the generated
 batch. Missing profiles/artifacts return 404. The endpoints inherit the existing
 localhost-only development setup and have no authentication yet.
 
-These artifacts are review data. They are not automatically embedded or passed
-to an LLM; that integration belongs to a later checkpoint. Run
+These artifacts are review data and are not automatically embedded. The sixth
+checkpoint uses eligible reviewed summaries as hints alongside retrieved messages.
+Run
 `python -m pytest -q` to verify generation, evidence inspection, correction,
 review persistence, conflict handling, and transaction rollback.
+
+## Sixth checkpoint: LLM integration and RAG
+
+The flow is question → semantic retrieval → bounded prompt → model reply →
+source validation. `app/llm.py` defines the provider interface and an OpenAI
+Responses API adapter. `app/chat.py` selects prompt context and validates citations.
+`app/prompts/grounded_chat.txt` contains the grounding and uncertainty instructions.
+
+### Configure and ask a question
+
+Edit `backend/.env` using `.env.example` as a guide. Set `OPENAI_API_KEY` and
+`LLM_MODEL` locally; do not put credentials in a request body or commit them.
+The selected model must support Responses API Structured Outputs and be available
+to your API project. No default model is selected. Restart after configuration
+changes. Process environment variables override file values; file loading does
+not mutate the process environment.
+
+Optional settings are `LLM_PROVIDER=openai`, `LLM_TIMEOUT_SECONDS=20` (1–60),
+and `LLM_MAX_OUTPUT_TOKENS=1600` (256–4096). These settings are validated at
+startup; invalid values must be corrected before the app can start. Missing keys
+do not prevent startup or local features, but provider-backed answers return 503.
+Database and embedding paths are still fixed; legacy `DATABASE_URL` and
+`EMBEDDING_MODEL` variables are not read.
+
+After importing and indexing a profile, open `/docs` and submit `POST /chat`:
+
+```json
+{
+  "profile_id": "your-profile-id",
+  "message": "What were our plans for learning to code?",
+  "recent_turns": [],
+  "min_score": 0.3
+}
+```
+
+The current request requires a nonblank question of 1–220 characters. It retrieves
+at most five passages. `min_score` is a similarity cutoff between 0 and 1, not a
+confidence threshold. Missing/stale indexes return 409; nonexistent profiles
+return 404. Build/rebuild the profile's index through the existing index endpoint.
+
+### Context and evidence boundaries
+
+- Only selected source spans are sent as historical evidence, with message IDs,
+  speaker labels and timestamps. Full messages may be returned in debug `context`,
+  but hidden text outside those spans cannot validate a model citation.
+- `recent_turns` accepts up to eight turns with roles `user` or `assistant`, each
+  containing 1–1,000 characters. The latest complete turns fitting a 4,000-character
+  content budget are retained. `history_trimmed` reports whether older turns were
+  omitted. Client-supplied history is not an authenticated historical record.
+- Up to three confirmed/corrected summary hints are included, each capped at 600
+  characters, only when all citation IDs occur in retrieved sources. Pending and
+  rejected artifacts and person/topic/event candidates are excluded. Hints are
+  labelled derived context, not independent proof.
+- Instructions tell the model to treat retrieved material, speaker labels,
+  summary hints, and recent turns as untrusted data; distinguish claims from
+  events; avoid impersonation and invented quotations; and acknowledge missing
+  or conflicting evidence. This is not a guarantee against prompt injection.
+
+An answered response includes exact-quote `citations`, retrieved `context`, used
+`summary_ids`, provider `model`, and `status=answered`. The server rejects replies
+with missing citations, unknown message IDs, or quotes outside the supplied
+excerpts. Citation lists are deduplicated. This verifies provenance only, not
+semantic entailment or completeness of every historical claim.
+
+When retrieval is empty, the API returns a fixed uncertainty statement without
+contacting the provider (`model=null`). The model may also signal insufficient
+evidence after reading the passages. In either case status is
+`insufficient_evidence` and citations are empty. Model refusals return `refused`.
+Malformed JSON, incomplete responses, schema violations and citation failures
+return 502 without exposing an unvalidated generated answer.
+
+### Provider behavior and privacy
+
+Chat uses HTTPS requests to OpenAI with Structured Outputs and `store:false`.
+The provider receives the question, selected excerpts and source metadata,
+bounded recent turns and eligible summary hints. The API key is sent only as an
+authorization header; Echo does not log credentials or raw upstream errors.
+`store:false` does not establish zero retention; provider policies still apply.
+Imports, artifact generation, and embeddings continue to run locally.
+
+Timeouts, connection failures and upstream 5xx responses have at most one retry
+with a 0.25-second delay. Rate limits are forwarded as 429 with a bounded numeric
+`Retry-After` value (or 30 seconds when unavailable), without an immediate retry.
+Exhausted timeouts return 504; connectivity, access/configuration and provider
+outages return 503. Other rejected requests return 502 with sanitized messages.
+Requests are synchronous and there is no streaming yet.
+
+This checkpoint is stateless: chat turns and new facts are not written to the
+database. Session persistence, topic tracking, follow-ups and live memory are
+the next milestone. Style profiles remain future work.
+
+### Verification for this checkpoint
+
+Run `python -m pytest -q`. Tests use real local SQLite/ChromaDB with deterministic
+test embeddings and mocked OpenAI HTTP responses. They exercise prompt assembly,
+schema payloads, recent-turn bounds, reviewed hints, citation provenance,
+unsupported questions, profile isolation, failures, refusals and retry behavior.
+No live OpenAI call has been made for this checkpoint, as requested. Real model
+access, latency, answer quality and grounding behavior still require evaluation
+using a locally configured key and representative, appropriately chosen examples.
+
+The request schema follows the official [Structured Outputs guide](https://developers.openai.com/api/docs/guides/structured-outputs).
