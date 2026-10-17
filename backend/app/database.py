@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint, create_engine, event
+from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, UniqueConstraint, create_engine, event
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
@@ -81,3 +81,22 @@ class SemanticIndex(Base):
     fingerprint: Mapped[str]
     model: Mapped[str]
     chunk_count: Mapped[int]
+
+
+class DerivedArtifact(Base):
+    """Reviewable derived content, separate from immutable imported messages."""
+
+    __tablename__ = "derived_artifacts"
+    __table_args__ = (UniqueConstraint("conversation_id", "kind", "artifact_key"),)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), index=True)
+    kind: Mapped[str]
+    artifact_key: Mapped[str]
+    content: Mapped[str] = mapped_column(Text)
+    source_message_ids: Mapped[list[str]] = mapped_column(JSON)
+    generated_content: Mapped[str] = mapped_column(Text)
+    generated_source_message_ids: Mapped[list[str]] = mapped_column(JSON)
+    method: Mapped[str]
+    uncertain: Mapped[bool]
+    status: Mapped[str] = mapped_column(default="pending")
+    revision: Mapped[int] = mapped_column(default=1)

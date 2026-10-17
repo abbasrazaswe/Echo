@@ -6,7 +6,8 @@ conversational style through retrieval-augmented generation (RAG).
 
 **Current stage:** a working local backend that parses WhatsApp text exports,
 stores conversations in SQLite, and supports message browsing, keyword search,
-semantic retrieval, and JSON export. AI-generated replies and the frontend are still planned.
+semantic retrieval, reviewable summaries and references, and JSON export.
+AI-generated replies and the frontend are still planned.
 
 ## Progress
 
@@ -16,17 +17,19 @@ semantic retrieval, and JSON export. AI-generated replies and the frontend are s
 | Transcript parsing | Implemented and tested with fictional samples | Common WhatsApp text formats, explicit date order, multiline messages, Unicode, system notices, source lines, JSON export |
 | Structured storage | Implemented and tested | Profiles, transactional imports, SQLite persistence, duplicate protection, pagination, keyword search, conversation export |
 | Semantic retrieval | Implemented and smoke-evaluated | Local embeddings, bounded context chunks, persistent ChromaDB indexes, source-linked results, stale-index detection |
-| Summaries and references | Next | Conversation summaries and people, event, and topic references |
-| Grounded AI replies | Planned | LLM integration using retrieved evidence and honest uncertainty |
+| Summaries and references | Implemented with local rules | Extractive segment summaries, participant labels, candidate topics/events, source inspection, correction and review |
+| Grounded AI replies | Next | LLM integration using retrieved evidence and honest uncertainty |
 | Conversation continuity | Planned | Session history, follow-ups, separate live memory |
 | Style profiles | Planned | Configurable vocabulary, punctuation, and conversational patterns |
 | Web interface | Planned | React chat, transcript browsing, memory inspection |
 | Deployment readiness | Planned | Authentication, access controls, operational documentation |
 
-The latest verified suite has **50 passing tests**, covering parsing, API
+The latest verified suite has **68 passing tests**, covering parsing, API
 validation, profile isolation, persistence after restart, transaction rollback,
 duplicate detection, search, and export fidelity. Retrieval tests also cover
 chunk bounds, provenance, model changes, incomplete builds, and stale indexes.
+Artifact tests cover source links, segment boundaries, profile isolation,
+correction validation, revision conflicts, atomic generation, and review persistence.
 The import/search/export flow has also been checked against the running HTTP server.
 
 ## Run locally
@@ -80,6 +83,53 @@ text is processed locally. Chroma's anonymized telemetry is disabled.
    `What are our plans for learning to code?`. Results contain ranked passages,
    similarity scores, source messages, and character spans. Rebuild the index
    after importing more conversations.
+8. Call `POST /profiles/{profile_id}/artifacts/generate`, then
+   `GET /profiles/{profile_id}/artifacts` with `kind=summary` to see extractive
+   summaries. Use `kind=person`, `event`, or `topic` to inspect reference candidates.
+9. Copy an artifact ID into `GET /profiles/{profile_id}/artifacts/{artifact_id}`
+   to inspect the source messages. Use PATCH on the same path to confirm,
+   correct, or reject it. See the review example below.
+
+## Summaries and reference review
+
+This checkpoint needs no API key or model download. It uses **extractive
+summaries**: up to three informative original-message excerpts from each segment
+of 20 imported records, in source order. Excerpts are capped at 500 text characters
+and labelled when truncated. They are selected examples, not a complete account
+of everything discussed or an AI-written paraphrase.
+
+People candidates are participant labels from the export. Topic candidates use
+frequent non-stopword terms; event candidates use English event words such as
+`meeting`, `flight`, and `appointment`. These rules may miss or misclassify
+references, especially in other languages. They do not infer real identities,
+event dates, whether plans happened, or relationships between people.
+
+Every artifact includes source message IDs and starts with review status `pending`.
+Reference candidates also carry `uncertain=true`. That flag describes the original
+rule-based extraction; review status separately records your decision. Inspect
+the supporting messages before reviewing a candidate.
+
+To correct an artifact, PATCH its path with the latest `revision`:
+
+```json
+{
+  "revision": 1,
+  "status": "corrected",
+  "content": "The conversation discusses plans to study Python."
+}
+```
+
+Use `{"revision":1,"status":"confirmed"}` or
+`{"revision":1,"status":"rejected"}` for decisions without changing fields.
+A correction may also provide `source_message_ids`; all must belong to the same
+conversation. The server returns the updated revision. An outdated revision
+returns HTTP 409 so you can reload before editing again.
+
+Original generated text and citations remain available alongside the latest
+reviewed version. Regeneration refreshes pending records and preserves confirmed,
+corrected, and rejected records. It never changes imported messages. Full edit
+history, automatic entity resolution, AI-written summaries, and using these
+artifacts in generated replies are later work.
 
 The flow so far is:
 
@@ -114,6 +164,9 @@ the parser refuses to overwrite files.
 | GET | `/profiles/{profile_id}/conversations/{conversation_id}/export` | Export a conversation as JSON |
 | POST | `/profiles/{profile_id}/memories/index` | Build or rebuild the profile's semantic index |
 | GET | `/profiles/{profile_id}/memories/search` | Search by meaning using `q`, `limit`, and `min_score` |
+| POST | `/profiles/{profile_id}/artifacts/generate` | Generate summaries/references, optionally scoped by `conversation_id` |
+| GET | `/profiles/{profile_id}/artifacts` | Browse using `kind`, `status`, `conversation_id`, `limit`, and `offset` |
+| GET / PATCH | `/profiles/{profile_id}/artifacts/{artifact_id}` | Inspect evidence or review/correct an artifact |
 
 ## Tests
 
@@ -150,6 +203,8 @@ Echo/
 │   ├── app/
 │   │   ├── main.py              # Application startup and health endpoint
 │   │   ├── api.py               # Profiles, imports, browsing, and export
+│   │   ├── artifact_api.py      # Artifact generation, inspection, and review
+│   │   ├── artifacts.py         # Extractive summaries and reference rules
 │   │   ├── database.py          # SQLAlchemy schema and SQLite connections
 │   │   ├── retrieval.py         # Chunking, embeddings, and vector snapshots
 │   │   └── parser/              # WhatsApp parser and command-line entry point
@@ -165,8 +220,8 @@ Echo/
 
 ## Current limits and next steps
 
-- Keyword search remains available alongside semantic retrieval. **Next:
-  summaries and structured references** linked to source messages.
+- Keyword search, semantic retrieval, and artifact review are available. **Next:
+  LLM integration and RAG** to generate replies supported by retrieved evidence.
 - Semantic results rank similarity; scores are not evidence that an answer is
   true. `min_score` can suppress weak matches but cannot reliably detect every
   question without an answer. Validate retrieval on your own examples before RAG.

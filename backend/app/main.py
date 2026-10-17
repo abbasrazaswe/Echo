@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from app.api import router
+from app.artifact_api import router as artifact_router
 from app.database import Database
 from app.retrieval import EmbeddingProvider, RetrievalService
 
@@ -23,8 +24,9 @@ def create_app(database_path: Path = DEFAULT_DATABASE, *, embedder: EmbeddingPro
         finally:
             database.engine.dispose()
 
-    application = FastAPI(title="Echo API", version="0.3.0", lifespan=lifespan)
+    application = FastAPI(title="Echo API", version="0.4.0", lifespan=lifespan)
     application.include_router(router)
+    application.include_router(artifact_router)
 
     @application.get("/health")
     async def health() -> dict[str, str]:

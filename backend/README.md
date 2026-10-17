@@ -2,6 +2,7 @@
 
 Echo runs a local HTTP server, parses WhatsApp exports, stores imported
 messages in SQLite, and retrieves passages by meaning with local embeddings.
+It also generates reviewable extractive summaries and reference candidates.
 No AI API keys are needed for these checkpoints.
 
 ## Setup (macOS/Linux)
@@ -247,3 +248,90 @@ airport, and programming conversations, and three paraphrased questions. It uses
 a temporary database while retaining the local model cache. Passing those three
 cases is a smoke check; representative conversation/language evaluation remains
 necessary before relying on retrieval for generated answers.
+
+## Fifth checkpoint: summaries and structured references
+
+These features use local deterministic rules and require no model download.
+They create derived artifacts in a new SQLite table, leaving imported records
+and the semantic index unchanged. The table is added automatically at startup;
+existing profiles and conversations are retained.
+
+### Try generation and review
+
+1. In `/docs`, choose an existing profile or import this fictional transcript:
+
+   ```json
+   {
+     "title": "Study plans",
+     "date_order": "day-first",
+     "transcript": "14/10/2026, 09:01 - Ali: Shall we study Python tomorrow?\n14/10/2026, 09:02 - Sara: Yes, Python practice sounds useful.\n14/10/2026, 09:03 - Ali: Our meeting is tomorrow at the library."
+   }
+   ```
+
+2. Run `POST /profiles/{profile_id}/artifacts/generate`. Optionally set
+   `conversation_id` to process only that import. The result reports `created`,
+   `refreshed`, and `preserved` counts.
+3. Run `GET /profiles/{profile_id}/artifacts`. Filter by `kind` (`summary`,
+   `person`, `event`, `topic`) or review `status`. Pagination uses `limit` (1–200)
+   and `offset` (0 or greater).
+4. Inspect an artifact using `GET /profiles/{profile_id}/artifacts/{artifact_id}`.
+   `sources` contains the current citations' full messages and source line numbers;
+   `generated_sources` contains the original generated citations' messages.
+5. PATCH that artifact with its latest revision, for example:
+
+   ```json
+   {"revision": 1, "status": "corrected", "content": "Plans to study Python and meet at the library."}
+   ```
+
+6. Generate again. The correction, its ID, and its reviewed status are preserved.
+   Pending artifacts are refreshed; new conversations receive new artifacts.
+
+### What is generated
+
+- **Summaries:** divide the original ordered records into groups of 20, exclude
+  system notices, blank messages and recognised media-only placeholders, and
+  choose up to three distinct message texts using recurring vocabulary. Selected
+  excerpts appear in original order. At most 500 characters from each message
+  are quoted, with explicit markers for omitted text. This can omit important
+  details; it is a compact extract, not a comprehensive or abstractive summary.
+- **People:** speaker labels from the export, including source message IDs.
+  A label is not a verified real-world identity. Mentions of new people inside
+  message bodies are not resolved or automatically linked to participants.
+- **Topics:** up to five candidate keywords per conversation, ranked by the
+  number of messages using a term after English stopword filtering.
+- **Events:** messages containing English cues such as meeting, appointment,
+  exam, flight or trip. The excerpt includes the matched cue. A mention may
+  describe a proposal, denial, past event or hypothetical situation; no event
+  occurrence or calendar date is inferred.
+
+The method is labelled `extractive-rules-v1`. These rules are inspectable and
+reproducible; language-specific extraction and model-written summaries remain
+future work. System-only conversations produce no artifacts.
+
+### Review rules and provenance
+
+All generated artifacts begin `pending`. References carry `uncertain=true`,
+whereas summary excerpts carry `uncertain=false` because their text is extracted
+directly; this does not establish that claims made by the speaker are true.
+Uncertainty describes the generation method and stays unchanged after review.
+
+Use `confirmed` or `rejected` without supplying edits. Use `corrected` with
+`content`, `source_message_ids`, or both. Corrected citations must be nonempty
+and belong to the artifact's conversation. IDs from another conversation or
+profile are rejected with 422. Source links validate provenance membership;
+the server cannot prove that a human-written correction is supported by them.
+
+Each PATCH requires the current `revision`, increments it on success, and returns
+409 for a stale edit. Regeneration also increments revisions on refreshed pending
+records. Reviewed records, including rejected ones, are protected from automatic
+regeneration. Original generated content and source IDs remain available alongside
+the latest correction. Intermediate edit history is not stored.
+
+Generation is synchronous and transactional. Failures roll back the generated
+batch. Missing profiles/artifacts return 404. The endpoints inherit the existing
+localhost-only development setup and have no authentication yet.
+
+These artifacts are review data. They are not automatically embedded or passed
+to an LLM; that integration belongs to a later checkpoint. Run
+`python -m pytest -q` to verify generation, evidence inspection, correction,
+review persistence, conflict handling, and transaction rollback.
