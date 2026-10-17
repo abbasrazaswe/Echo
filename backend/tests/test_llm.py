@@ -8,7 +8,7 @@ from app.llm import LLMError, LLMSettings, OpenAIProvider
 
 def response_payload():
     return {"status": "completed", "output": [{"type": "message", "content": [{
-        "type": "output_text", "text": json.dumps({"answer": "Not enough evidence.", "insufficient_evidence": True, "citations": []}),
+        "type": "output_text", "text": json.dumps({"answer": "Not enough evidence.", "insufficient_evidence": True, "citations": [], "live_citations": [], "follow_up_question": None}),
     }]}]}
 
 

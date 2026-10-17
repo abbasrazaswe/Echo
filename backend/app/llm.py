@@ -20,6 +20,17 @@ class ModelAnswer(BaseModel):
     answer: str = Field(min_length=1, max_length=8000)
     insufficient_evidence: bool
     citations: list[Citation] = Field(max_length=10)
+    live_citations: list["LiveCitation"] = Field(max_length=10)
+    follow_up_question: str | None = Field(max_length=220)
+
+
+class LiveCitation(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    memory_id: str = Field(min_length=1)
+    quote: str = Field(min_length=1, max_length=220)
+
+
+ModelAnswer.model_rebuild()
 
 
 class LLMProvider(Protocol):

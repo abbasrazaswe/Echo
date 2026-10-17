@@ -36,6 +36,7 @@ class MockModel:
         answer = {
             "answer": "Ali proposed studying Python functions tomorrow.",
             "insufficient_evidence": False,
+            "live_citations": [], "follow_up_question": None,
             "citations": [{"message_id": evidence["message_id"], "quote": evidence["text"]}],
         }
         if self.mode == "bad_id":

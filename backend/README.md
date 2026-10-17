@@ -5,6 +5,8 @@ messages in SQLite, and retrieves passages by meaning with local embeddings.
 It also generates reviewable extractive summaries and reference candidates.
 These features run locally without an API key. The sixth checkpoint adds
 provider-backed grounded chat, which requires local configuration for real replies.
+The seventh adds persistent sessions and explicit live memory. Saving memories and
+browsing sessions work locally; provider-generated follow-up replies still require configuration.
 
 ## Setup (macOS/Linux)
 
@@ -175,7 +177,7 @@ Invalid input returns HTTP 422; missing profiles/conversations return 404.
 Import accepts transcript text in JSON, up to 2,000,000 characters. File upload,
 authentication, and remote deployment are later work. Keep the server bound to
 `127.0.0.1` until access controls are added. Historical imports remain separate
-from future live chat memory; live memory is not implemented yet.
+from live chat memory stored in separate tables by the seventh checkpoint.
 
 Run `python -m pytest -q` for the parser and API/storage checks, including
 restart persistence, profile isolation, rollback, duplicates, and export fidelity.
@@ -402,8 +404,9 @@ with missing citations, unknown message IDs, or quotes outside the supplied
 excerpts. Citation lists are deduplicated. This verifies provenance only, not
 semantic entailment or completeness of every historical claim.
 
-When retrieval is empty, the API returns a fixed uncertainty statement without
-contacting the provider (`model=null`). The model may also signal insufficient
+For stateless requests, empty retrieval returns a fixed uncertainty statement
+without contacting the provider (`model=null`). Session requests can additionally
+use live memory as described below. The model may also signal insufficient
 evidence after reading the passages. In either case status is
 `insufficient_evidence` and citations are empty. Model refusals return `refused`.
 Malformed JSON, incomplete responses, schema violations and citation failures
@@ -425,9 +428,9 @@ Exhausted timeouts return 504; connectivity, access/configuration and provider
 outages return 503. Other rejected requests return 502 with sanitized messages.
 Requests are synchronous and there is no streaming yet.
 
-This checkpoint is stateless: chat turns and new facts are not written to the
-database. Session persistence, topic tracking, follow-ups and live memory are
-the next milestone. Style profiles remain future work.
+Requests without session fields remain stateless. The seventh checkpoint below
+adds stored turns, topic tracking, optional follow-ups and explicit live memory.
+Style profiles remain future work.
 
 ### Verification for this checkpoint
 
@@ -440,3 +443,137 @@ access, latency, answer quality and grounding behavior still require evaluation
 using a locally configured key and representative, appropriately chosen examples.
 
 The request schema follows the official [Structured Outputs guide](https://developers.openai.com/api/docs/guides/structured-outputs).
+
+## Seventh checkpoint: persistent conversations and live memory
+
+Three new SQLite tables hold `ChatSession`, `ChatTurn`, and `LiveMemory` records.
+Startup adds these tables without modifying imported messages. Historical
+retrieval and artifact generation still read the original transcript tables;
+chat turns and live memories are not added to the historical vector index.
+
+### Start and continue a session
+
+Create a session with `POST /profiles/{profile_id}/sessions` and a JSON body such
+as `{"title":"Learning chat"}`. The returned session has `revision=0` and
+`turn_count=0`. Supply `session_id` and `session_revision` together on `/chat`:
+
+```json
+{
+  "profile_id": "your-profile-id",
+  "session_id": "your-session-id",
+  "session_revision": 0,
+  "message": "What were our Python plans?",
+  "allow_follow_up": true
+}
+```
+
+Use the returned revision on the next exchange. Session requests reject nonempty
+`recent_turns` because the server loads its own history. With no session fields,
+the existing stateless contract still works. Creating a session does not require
+a model key. Import-based replies still need a current historical index; a session
+with no imported conversations can use its live memory without building an index.
+
+Every accepted session exchange stores one user turn and one assistant turn,
+including response status, historical/live citations, model name, and an optional
+follow-up question. Uncertainty replies, refusals and memory acknowledgements are
+also saved. Provider errors, invalid citations and stale-index errors save nothing.
+Saving both turns, new memories, topic state and the revision is one transaction.
+
+The session revision prevents stale and concurrent writes. A conflict returns
+409 without inserting a partial exchange. If another request wins while a model
+call is in progress, the losing generated reply is discarded; provider usage may
+already have occurred. After a lost network response, inspect the saved turns
+before retrying with a new revision to avoid repeating an accepted message.
+
+`GET /profiles/{profile_id}/sessions` supports `limit` and `offset`.
+`GET /profiles/{profile_id}/sessions/{session_id}` returns the current revision,
+topic and turn count. `/turns` under that session returns ordered, paginated
+turns (`limit` 1–200, `offset` 0 or greater). IDs are scoped to the profile.
+
+### Stored history, topic hints and follow-ups
+
+Prompt history uses the last eight stored turns. Each is capped at 1,000 content
+characters for the prompt; only the newest complete capped turns fitting 4,000
+characters are forwarded. Full turn text remains stored. `history_trimmed` reports
+omission or truncation. The generated follow-up question is stored separately
+and appended to its assistant turn when preparing history, within that same cap.
+
+The topic is an English-stopword-filtered keyword label (up to 120 characters)
+from the latest substantive message. Its original query is retained internally.
+Recognised short English continuations (`Tell me more?`, `Why?`, `Continue`,
+`What about that?`, and a few similar forms) combine that query with the new
+message, bounded to 220 characters. `retrieval_query` exposes the query used.
+This does not resolve arbitrary pronouns, languages, or complex topic changes.
+
+The model returns an optional `follow_up_question` field. The server suppresses
+it if the caller sets `allow_follow_up=false`, if a question was asked too recently,
+or if its normalized text repeats one of the last ten session follow-ups, recent
+assistant text, or the current user message. At least two accepted exchanges must
+intervene between follow-up questions. Questions are not returned after uncertainty,
+refusals or memory acknowledgements. Prompt instructions require relevant questions
+without invented premises; relevance and semantic duplicate detection are not
+programmatically verified. The cooldown applies to persisted session exchanges.
+
+### Save and recall live information
+
+Live memories are explicit user statements. Send a dedicated request such as:
+
+```json
+{
+  "profile_id": "your-profile-id",
+  "session_id": "your-session-id",
+  "session_revision": 0,
+  "message": "For this demo, I am learning Python.",
+  "remember": ["For this demo, I am learning Python."]
+}
+```
+
+Replace the revision with the session's current value. Each entry must be a
+nonblank exact excerpt from `message`, up to 220 characters. At most three entries
+are accepted; duplicates within the request are removed. A session is required.
+The request returns `status=memory_saved`, `saved_memory_ids`, and the new revision.
+It is acknowledged locally without retrieval or a provider call, even with no
+imports or model key. It is a save action; ask any accompanying question separately.
+
+Each memory links to its originating user turn. Assistant text is not automatically
+promoted into facts. The same assertion may be saved again in another turn, keeping
+its separate provenance. There is no automatic extraction, merge, conflict
+resolution, or general cross-session history sharing.
+
+Recall uses up to the 20 newest active memories across the same profile, fitting
+4,000 content characters. Session history itself stays session-specific. The prompt
+labels memories `source=live`, with source turn and session IDs, and treats them as
+unverified user statements. For a live-only claim the model must use
+`live_citations=[{"memory_id":"...","quote":"exact excerpt"}]`, while imported
+claims use the existing `citations` array with historical message IDs. Mixed replies
+can use both arrays. Unknown IDs, mismatched quotes and live IDs passed off as
+historical citations are rejected with 502. This verifies source membership, not
+whether a generated claim follows logically from it or is true.
+
+The response's `live_memory_context` shows the memories supplied to the model.
+Older memories remain stored but may not be included by this recency policy.
+There is no semantic live-memory index yet. If both retrieved historical evidence
+and selected live memory are empty, return uncertainty without a provider call.
+Current-message assertions and old chat replies alone do not qualify as evidence.
+
+Browse `GET /profiles/{profile_id}/live-memories` with `active`, `limit`, and
+`offset` filters. PATCH `/profiles/{profile_id}/live-memories/{memory_id}` with
+`{"active":false}` to retract, or `true` to reactivate. Content is immutable through
+this endpoint; save a replacement explicitly and retract the old entry. Retraction
+excludes a memory from future live evidence but does not erase original turns,
+past replies or citations. If a cited memory is retracted during generation, the
+reply is rejected with 409 and no new turns are committed.
+
+Configured model requests now also send selected live memories, stored recent
+turns, and topic/follow-up hints to the external provider. Explicit memory saves
+remain local. Source data stays excluded from Git. Authentication, data deletion
+and deployment hardening remain future work; keep using localhost.
+
+### Verification
+
+Run `python -m pytest -q`. Session tests cover persistence, topic-aware retrieval,
+history/memory budgets, follow-up cooldowns, profile and session isolation,
+memory provenance/retraction, stale and concurrent requests, and rollback.
+The older stateless chat tests remain in the suite. LLM behavior continues to use
+mocks; no hosted-model evaluation has been run, and real multi-turn conversational
+quality remains unverified. The next milestone is configurable style profiles.

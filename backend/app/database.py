@@ -100,3 +100,43 @@ class DerivedArtifact(Base):
     uncertain: Mapped[bool]
     status: Mapped[str] = mapped_column(default="pending")
     revision: Mapped[int] = mapped_column(default=1)
+
+
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id)
+    profile_id: Mapped[str] = mapped_column(ForeignKey("profiles.id"), index=True)
+    title: Mapped[str]
+    revision: Mapped[int] = mapped_column(default=0)
+    turn_count: Mapped[int] = mapped_column(default=0)
+    topic: Mapped[str | None]
+    topic_query: Mapped[str | None]
+    last_follow_up_revision: Mapped[int] = mapped_column(default=-10)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ChatTurn(Base):
+    __tablename__ = "chat_turns"
+    __table_args__ = (UniqueConstraint("session_id", "sequence_number"),)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id)
+    session_id: Mapped[str] = mapped_column(ForeignKey("chat_sessions.id"), index=True)
+    sequence_number: Mapped[int]
+    role: Mapped[str]
+    content: Mapped[str] = mapped_column(Text)
+    status: Mapped[str | None]
+    citations: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    live_citations: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    follow_up_question: Mapped[str | None]
+    model: Mapped[str | None]
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class LiveMemory(Base):
+    __tablename__ = "live_memories"
+    __table_args__ = (UniqueConstraint("source_turn_id", "content"),)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id)
+    session_id: Mapped[str] = mapped_column(ForeignKey("chat_sessions.id"), index=True)
+    source_turn_id: Mapped[str] = mapped_column(ForeignKey("chat_turns.id"))
+    content: Mapped[str]
+    active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

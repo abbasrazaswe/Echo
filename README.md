@@ -7,6 +7,8 @@ conversational style through retrieval-augmented generation (RAG).
 **Current stage:** a working local backend that parses WhatsApp text exports,
 stores conversations in SQLite, and supports message browsing, keyword search,
 semantic retrieval, reviewable summaries and references, and JSON export.
+Chat sessions now persist turns, track a simple topic, and keep explicitly saved
+live memory separate from imported history.
 The grounded chat endpoint is implemented with an OpenAI adapter; provider behavior
 is tested with mocked HTTP responses. A live hosted-model evaluation and the
 frontend are still pending.
@@ -21,12 +23,12 @@ frontend are still pending.
 | Semantic retrieval | Implemented and smoke-evaluated | Local embeddings, bounded context chunks, persistent ChromaDB indexes, source-linked results, stale-index detection |
 | Summaries and references | Implemented with local rules | Extractive segment summaries, participant labels, candidate topics/events, source inspection, correction and review |
 | Grounded AI replies | Implemented; provider tested with mocks | Responses API adapter, bounded evidence/history, exact-quote citation checks, uncertainty and provider failure handling |
-| Conversation continuity | Next | Persistent sessions, follow-ups, separate live memory |
-| Style profiles | Planned | Configurable vocabulary, punctuation, and conversational patterns |
+| Conversation continuity | Implemented; model behavior mocked | Persistent sessions/turns, topic-aware short follow-ups, question cooldown, explicit live memory and retraction |
+| Style profiles | Next | Configurable vocabulary, punctuation, and conversational patterns |
 | Web interface | Planned | React chat, transcript browsing, memory inspection |
 | Deployment readiness | Planned | Authentication, access controls, operational documentation |
 
-The latest verified suite has **100 passing tests**, covering parsing, API
+The latest verified suite has **123 passing tests**, covering parsing, API
 validation, profile isolation, persistence after restart, transaction rollback,
 duplicate detection, search, and export fidelity. Retrieval tests also cover
 chunk bounds, provenance, model changes, incomplete builds, and stale indexes.
@@ -34,6 +36,8 @@ Artifact tests cover source links, segment boundaries, profile isolation,
 correction validation, revision conflicts, atomic generation, and review persistence.
 Chat tests cover prompt boundaries, unsupported questions, quote/source validation,
 profile isolation, provider retries, rate limits, refusals, and configuration loading.
+Session tests cover restart persistence, concurrent writes, history/memory budgets,
+follow-up cooldowns, explicit memory provenance, retraction, and atomic saves.
 The import/search/export flow has also been checked against the running HTTP server.
 
 ## Run locally
@@ -131,35 +135,105 @@ Import conversations and build the selected profile's semantic index, then use:
 `citations`, the retrieved `context`, any reviewed `summary_ids` used as hints,
 `history_trimmed`, and the provider `model`. Inspect the source messages and
 character spans in `context` to assess the evidence.
+Session requests additionally return `session_id`, `session_revision`, `topic`,
+`retrieval_query`, `follow_up_question`, `live_citations`, `live_memory_context`,
+and `saved_memory_ids`. Live citations point to new user statements, not imports.
 
-- No passages above the threshold: return `insufficient_evidence` without a model call.
+- No passages above the threshold and no selected live memories: return
+  `insufficient_evidence` without a model call.
 - Retrieved passages do not answer the question: the model can signal insufficient
   evidence, which produces a fixed uncertainty reply without citations.
-- An answered reply must cite retrieved message IDs with exact quotes from the
-  excerpts sent to the model. Invalid or missing citations return 502.
+- An answered reply must cite retrieved historical message IDs or selected live
+  memory IDs with exact quotes from supplied evidence. Invalid or missing
+  citations return 502. The two source types use separate citation arrays.
 - Citation checks establish provenance, not that every generated claim follows
   logically from the quoted text. Retrieval and answer quality still need evaluation.
 
 The question is limited to 220 characters to match the current retrieval inputs.
 You may supply up to eight recent user/assistant turns, each up to 1,000 characters;
 only the latest complete turns fitting 4,000 content characters are forwarded.
-Recent turns are client-provided context, not historical evidence. Up to three
+For stateless requests, recent turns are client-provided context, not historical
+evidence. Session requests load their history from storage instead. Up to three
 reviewed summary hints are included when all their source IDs occur in retrieval.
 Unreviewed/rejected artifacts and people/event/topic candidates are not forwarded.
 
 **External processing:** configured chat sends the question, bounded recent turns,
 retrieved excerpts, speaker labels/timestamps, and applicable reviewed summary hints
-to OpenAI. Requests use `store:false`; this is not a claim of zero data retention.
+to OpenAI. Session chat also includes selected active live memories and topic/follow-up
+context. Requests use `store:false`; this is not a claim of zero data retention.
 Source records and local vector indexes remain on your machine.
 
 Provider timeouts, connection failures, and 5xx errors receive at most one retry.
 Rate limits return 429 with `Retry-After`; exhausted timeouts return 504;
 configuration/connectivity/provider outages return 503. Refusals return `refused`.
-Chat is currently stateless: it does not save sessions, replies, or new memories.
+Omitting session fields keeps requests stateless. Session-backed requests save
+validated exchanges; explicit memory saves can be acknowledged without a model.
 
 **Verification:** provider requests/responses are mocked in tests. No live OpenAI
 call has been made for this checkpoint. A successful mocked test is not evidence
 of hosted-model access, output quality, or resistance to all prompt injections.
+
+## Persistent sessions and live memory
+
+1. Create a session with `POST /profiles/{profile_id}/sessions` and body
+   `{"title":"Learning chat"}`. Copy its `id` and initial `revision` (0).
+2. Include both fields in `/chat` requests:
+
+   ```json
+   {
+     "profile_id": "your-profile-id",
+     "session_id": "your-session-id",
+     "session_revision": 0,
+     "message": "What were our Python plans?"
+   }
+   ```
+
+3. Use the returned `session_revision` for the next request. History is loaded
+   automatically; do not also supply `recent_turns`.
+4. Browse saved exchanges with
+   `GET /profiles/{profile_id}/sessions/{session_id}/turns`. Session state and turns
+   survive restarts. A stale revision returns 409; reload the session and check
+   its saved turns before retrying a request whose response was lost.
+
+To save a new user statement explicitly, send a separate memory request:
+
+```json
+{
+  "profile_id": "your-profile-id",
+  "session_id": "your-session-id",
+  "session_revision": 0,
+  "message": "For this demo, I am learning Python.",
+  "remember": ["For this demo, I am learning Python."]
+}
+```
+
+Replace the revision with the current value. Each `remember` entry must be an exact
+excerpt from the current message (up to three entries). The request saves a
+user/assistant pair and returns `memory_saved` locally, without retrieval or a
+provider call. If you also have a question, ask it in the next request.
+
+Active live memories are shared across sessions **within the same profile**;
+turn history remains session-specific. They carry `source=live` and a
+`source_turn_id` linking to the user statement. Assistant-generated text is never
+automatically saved as a fact. Recalled statements use a separate `live_citations`
+array with memory IDs and exact quotes. They are user assertions, not verified
+truth or evidence of an imported historical event.
+
+Browse `/profiles/{profile_id}/live-memories` and PATCH an item's path with
+`{"active":false}` to exclude it from future live evidence, or `true` to reactivate.
+Retraction does not erase the saved turn, historical replies, or their citations.
+The prompt uses at most the 20 newest active profile memories fitting 4,000 content
+characters. Older facts are still stored; semantic live-memory search is later work.
+
+The topic is a simple keyword label from the latest substantive user message.
+Recognised English continuations such as `Tell me more?` reuse its retrieval
+query; this is a heuristic, not general reference resolution. Follow-up questions
+are a separate response field: they are optional, suppressed after uncertainty,
+refusals and memory acknowledgements, and rate limited to allow at least two
+intervening session exchanges. Normalized duplicates of the last ten follow-ups
+or recent assistant text are suppressed. Set `allow_follow_up=false` to disable.
+Actual question relevance and multi-turn language quality remain unverified with
+a live model.
 
 ## Summaries and reference review
 
@@ -241,6 +315,11 @@ the parser refuses to overwrite files.
 | GET | `/profiles/{profile_id}/artifacts` | Browse using `kind`, `status`, `conversation_id`, `limit`, and `offset` |
 | GET / PATCH | `/profiles/{profile_id}/artifacts/{artifact_id}` | Inspect evidence or review/correct an artifact |
 | POST | `/chat` | Generate a reply using retrieved source passages and optional recent turns |
+| POST / GET | `/profiles/{profile_id}/sessions` | Create or list persistent chat sessions |
+| GET | `/profiles/{profile_id}/sessions/{session_id}` | Read revision, topic, and turn count |
+| GET | `/profiles/{profile_id}/sessions/{session_id}/turns` | Browse saved turns with pagination |
+| GET | `/profiles/{profile_id}/live-memories` | Browse user-stated memories, optionally filtered by `active` |
+| PATCH | `/profiles/{profile_id}/live-memories/{memory_id}` | Retract or reactivate a live memory |
 
 ## Tests
 
@@ -283,6 +362,7 @@ Echo/
 │   │   ├── artifacts.py         # Extractive summaries and reference rules
 │   │   ├── chat.py              # Prompt context and citation validation
 │   │   ├── llm.py               # Provider interface, OpenAI adapter, settings
+│   │   ├── sessions.py          # Persistent turns, live memory, topic/revision handling
 │   │   ├── prompts/             # Grounding instructions
 │   │   ├── database.py          # SQLAlchemy schema and SQLite connections
 │   │   ├── retrieval.py         # Chunking, embeddings, and vector snapshots
@@ -299,8 +379,8 @@ Echo/
 
 ## Current limits and next steps
 
-- The grounded chat API is implemented with mocked provider coverage. **Next:
-  persistent conversation sessions and separate live memory**. Hosted-model
+- Session continuity and explicit live memory are implemented with mocked model
+  coverage. **Next: configurable conversational style profiles**. Hosted-model
   evaluation remains pending until credentials are configured locally.
 - Semantic results rank similarity; scores are not evidence that an answer is
   true. `min_score` can suppress weak matches but cannot reliably detect every
