@@ -10,7 +10,7 @@ from sqlalchemy import func, select, update
 
 from app.api import SessionDependency, require_profile
 from app.artifacts import tokens
-from app.database import ChatSession, ChatTurn, Database, LiveMemory, new_id
+from app.database import ChatSession, ChatTurn, Database, LiveMemory, TurnStyle, new_id
 
 
 router = APIRouter(prefix="/profiles/{profile_id}", tags=["Sessions and live memory"])
@@ -86,6 +86,7 @@ class TurnOutput(BaseModel):
     follow_up_question: str | None
     model: str | None
     created_at: datetime
+    style: dict | None = None
 
 
 class TurnPage(BaseModel):
@@ -103,7 +104,10 @@ def list_turns(profile_id: str, session_id: str, session: SessionDependency,
     items = session.scalars(select(ChatTurn).where(ChatTurn.session_id == session_id).order_by(
         ChatTurn.sequence_number,
     ).limit(limit).offset(offset)).all()
-    return {"items": items, "total": record.turn_count, "limit": limit, "offset": offset}
+    styles = {style.turn_id: {"revision": style.revision, "settings": style.settings}
+              for style in session.scalars(select(TurnStyle).where(TurnStyle.turn_id.in_([item.id for item in items])))}
+    rows = [{**TurnOutput.model_validate(item).model_dump(), "style": styles.get(item.id)} for item in items]
+    return {"items": rows, "total": record.turn_count, "limit": limit, "offset": offset}
 
 
 class MemoryPage(BaseModel):
@@ -222,13 +226,16 @@ def persist_exchange(database: Database, profile_id: str, state: SessionContext,
         session.add(user_turn)
         session.flush()
         assistant = ChatTurn(
-            session_id=state.record.id, sequence_number=state.record.turn_count + 2,
+            id=new_id(), session_id=state.record.id, sequence_number=state.record.turn_count + 2,
             role="assistant", content=result["answer"], status=result["status"],
             citations=[citation.model_dump() for citation in result["citations"]],
             live_citations=[citation.model_dump() for citation in result["live_citations"]],
             follow_up_question=result["follow_up_question"], model=result["model"],
         )
         session.add(assistant)
+        if result.get("style"):
+            session.flush()
+            session.add(TurnStyle(turn_id=assistant.id, **result["style"]))
         saved_ids = []
         for fact in dict.fromkeys(remember):
             memory = LiveMemory(id=new_id(), session_id=state.record.id, source_turn_id=user_turn.id, content=fact)

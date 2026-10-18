@@ -140,3 +140,22 @@ class LiveMemory(Base):
     content: Mapped[str]
     active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ProfileStyle(Base):
+    __tablename__ = "profile_styles"
+    profile_id: Mapped[str] = mapped_column(ForeignKey("profiles.id"), primary_key=True)
+    revision: Mapped[int] = mapped_column(default=1)
+    speaker: Mapped[str | None]
+    conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id"))
+    fingerprint: Mapped[str | None]
+    analysis: Mapped[dict | None] = mapped_column(JSON)
+    suggested_settings: Mapped[dict | None] = mapped_column(JSON)
+    settings: Mapped[dict] = mapped_column(JSON)
+
+
+class TurnStyle(Base):
+    __tablename__ = "turn_styles"
+    turn_id: Mapped[str] = mapped_column(ForeignKey("chat_turns.id"), primary_key=True)
+    revision: Mapped[int]
+    settings: Mapped[dict] = mapped_column(JSON)

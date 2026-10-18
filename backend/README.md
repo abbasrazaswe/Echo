@@ -7,6 +7,7 @@ These features run locally without an API key. The sixth checkpoint adds
 provider-backed grounded chat, which requires local configuration for real replies.
 The seventh adds persistent sessions and explicit live memory. Saving memories and
 browsing sessions work locally; provider-generated follow-up replies still require configuration.
+The eighth adds local style analysis and reviewed presentation settings for replies.
 
 ## Setup (macOS/Linux)
 
@@ -430,7 +431,7 @@ Requests are synchronous and there is no streaming yet.
 
 Requests without session fields remain stateless. The seventh checkpoint below
 adds stored turns, topic tracking, optional follow-ups and explicit live memory.
-Style profiles remain future work.
+The eighth checkpoint below adds reviewed style settings without changing evidence rules.
 
 ### Verification for this checkpoint
 
@@ -576,4 +577,155 @@ history/memory budgets, follow-up cooldowns, profile and session isolation,
 memory provenance/retraction, stale and concurrent requests, and rollback.
 The older stateless chat tests remain in the suite. LLM behavior continues to use
 mocks; no hosted-model evaluation has been run, and real multi-turn conversational
-quality remains unverified. The next milestone is configurable style profiles.
+quality remains unverified. Style controls are covered in the eighth checkpoint below.
+
+## Eighth checkpoint: configurable writing style
+
+Style analysis measures text patterns, not personality or identity. The application
+keeps three distinct things: measured source statistics, suggested settings, and
+the settings you actually review/enable. Only the latter can reach the model prompt.
+There is one current style configuration per profile, shared across its sessions.
+Creating a separate profile allows a separate configuration.
+
+### Analyze, review and enable
+
+1. Read `GET /profiles/{profile_id}/style`. Without a saved record, revision is 0,
+   settings are neutral and disabled, and analysis is null. GET does not create data.
+2. Run `POST /profiles/{profile_id}/style/analyze`:
+
+   ```json
+   {"revision": 0, "speaker": "Ali"}
+   ```
+
+   Use an exact speaker label from the profile's messages. An optional
+   `conversation_id` restricts the scope to one import. The current revision is
+   required; the example assumes a new profile style.
+3. Inspect `analysis.metrics`, `common_words`, `common_phrases`, `common_emojis`,
+   source IDs, sample flags, and `suggested_settings`. This saves a new revision
+   but does not enable style or replace existing reviewed settings.
+4. PATCH `/profiles/{profile_id}/style` with the current revision and chosen fields:
+
+   ```json
+   {
+     "revision": 1,
+     "settings": {
+       "enabled": true,
+       "length": "brief",
+       "tone": "warm",
+       "emoji_usage": "occasional",
+       "preferred_words": ["haan", "python"]
+     }
+   }
+   ```
+
+5. Submit a normal stateless or session `/chat` request. Answered model replies
+   return a `style` snapshot of the revision/settings requested. This does not
+   certify that the model followed them. Fixed local responses return `style=null`.
+
+PATCH merges only supplied settings. Empty/null fields, unknown keys, unsupported
+values, and sentence-like preferred words return 422. A stale revision returns
+409. Manual settings can be saved without analyzing any transcript. New analyses
+refresh only statistics/suggestions, preserving active settings and their enabled
+state. A different analyzed speaker does not automatically replace active settings.
+
+### Available controls
+
+| Setting | Values |
+| --- | --- |
+| `enabled` | `false` by default; explicit enable/disable |
+| `length` | `brief`, `balanced`, `detailed` |
+| `tone` | `neutral`, `casual`, `warm`, `formal` |
+| `punctuation` | `standard`, `light`, `expressive` |
+| `emoji_usage` | `none`, `occasional` |
+| `capitalization` | `standard`, `mostly_lowercase` |
+| `language` | `match_user`, `english`, `urdu`, `roman_urdu`, `english_urdu_mix` |
+| `preferred_words` | At most ten individual words, each at most 32 characters |
+
+Preferred words allow letters and internal apostrophes/hyphens, not sentences,
+digits, emoji or arbitrary instruction text. They are optional diction hints;
+the model must not invent a fact or force a topic to use one. Language is a manual
+choice; the analyzer always suggests `match_user`. Tone stays neutral in suggestions
+because the rules do not establish a speaker's emotional intent.
+
+### What the analyzer measures
+
+The method is `writing-patterns-v1`. It samples up to 1,000 records for the selected
+speaker, ordered by conversation start time/ID and source sequence. System notices,
+blank text and recognised media-only placeholders are excluded. Each usable text
+is capped at 1,000 characters; the combined text budget is 100,000 characters.
+`sample_truncated` reports omitted/truncated records or text, and `sample_limited`
+flags fewer than 20 usable messages. Statistics reflect that bounded sample.
+
+- Length is measured using whitespace-delimited word units and characters.
+- Terminal punctuation measures the final non-whitespace character. A message
+  ending in an emoji after punctuation may not count as terminally punctuated.
+- Common words use case-folded letter tokens and English stopword filtering;
+  `occurrences` counts tokens. Phrases are normalized two/three-word sequences
+  found in at least two messages. Their `message_count` is document frequency,
+  with up to three example source message IDs each. They are not exact quotations.
+- Emoji detection uses broad Unicode ranges and counts codepoints approximately.
+  Joined sequences, modifiers, flags and text symbols are not grapheme-aware;
+  ASCII emoticons are not counted as emoji.
+- Script buckets distinguish ASCII Latin letters, Arabic-script alphabetic
+  characters, both, or neither. Digits/punctuation alone do not establish Arabic
+  script. This cannot distinguish Urdu from Arabic or English from Roman Urdu.
+- Lowercase rate considers only messages containing cased characters. Uncased
+  scripts do not imply a lowercase preference.
+
+Suggestions use transparent thresholds: median words ≤10 suggests brief, ≥30
+suggests detailed; otherwise balanced. Terminal punctuation below 30% suggests
+light punctuation. Emoji in at least 10% of messages suggests occasional emoji.
+At least five sampled messages and ≥75% lowercase cased messages suggest mostly
+lowercase. Repeated common words become optional vocabulary suggestions. These
+are starting points for review, not validated linguistic classifications.
+
+`analysis_stale` compares the analyzed scope's imported-conversation fingerprint
+with the current source set. Profile-wide analyses can become stale after any new
+import; conversation-scoped analyses remain tied to that conversation. Staleness
+does not silently disable or replace reviewed preferences. Reanalyze with the
+latest revision to refresh the sample.
+
+### Separation from evidence and turn history
+
+The prompt receives only validated enabled settings under `presentation_style`.
+It does not receive raw analysis, source phrases, or the analyzed speaker's name
+as style material. Existing retrieved messages can still contain those details
+independently as evidence. Style changes neither retrieval queries nor source
+selection, citation checks, live-memory labels, or follow-up cooldowns. No output
+post-processing rewrites facts or citation quotes to force a style.
+
+Source messages, embeddings and artifacts remain unchanged. Generated text stays
+new assistant dialogue; no style option claims it is an authentic message from
+the selected speaker. Uncertainty/refusal/save acknowledgements remain neutral.
+
+Two additive SQLite tables hold `ProfileStyle` and `TurnStyle`. For an answered
+session reply with active style, the exact requested settings/revision are saved
+with the assistant turn in the same transaction as the exchange. `/turns` includes
+this snapshot, so later settings changes do not relabel past replies. User turns,
+old turns, and fixed acknowledgements have `style=null`.
+
+### Local evaluation
+
+Use `POST /profiles/{profile_id}/style/evaluate` with a candidate reply:
+
+```json
+{"text": "haan, python practice sounds good 🙂"}
+```
+
+The result returns observed metrics, source baseline metrics when available,
+staleness, preferred-word presence, and simple checks against saved settings.
+These checks run even when settings are disabled, allowing local inspection:
+brief ≤40 whitespace word units; balanced ≤120; detailed ≥40. Emoji budgets are
+zero codepoints for none or at most two for occasional. Mostly-lowercase checks
+require all cased text to be lowercase; names and exact quotes may trigger a flag.
+Do not change authentic quotes just to pass a diagnostic.
+
+The endpoint does not call a model, save the candidate text, gate chat replies,
+or score tone, language identity, semantic similarity or factual grounding.
+Comparing a full generated reply with short source messages has obvious length
+differences; treat the numbers as inspection aids, not a likeness score.
+
+Run `python -m pytest -q` for analysis/scoping, revisions, settings review,
+staleness, bounds, prompt/evidence separation and immutable turn snapshots. Actual
+hosted-model style quality remains untested because generation still uses mocks.
+The next milestone is the React chat and memory-inspection frontend.

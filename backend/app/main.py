@@ -10,6 +10,7 @@ from app.database import Database
 from app.llm import LLMProvider, LLMSettings, OpenAIProvider
 from app.retrieval import EmbeddingProvider, RetrievalService
 from app.sessions import router as session_router
+from app.style import router as style_router
 
 
 DEFAULT_DATABASE = Path(__file__).resolve().parents[1] / "data/profiles/echo.db"
@@ -32,11 +33,12 @@ def create_app(
         finally:
             database.engine.dispose()
 
-    application = FastAPI(title="Echo API", version="0.6.0", lifespan=lifespan)
+    application = FastAPI(title="Echo API", version="0.7.0", lifespan=lifespan)
     application.include_router(router)
     application.include_router(artifact_router)
     application.include_router(chat_router)
     application.include_router(session_router)
+    application.include_router(style_router)
 
     @application.get("/health")
     async def health() -> dict[str, str]:

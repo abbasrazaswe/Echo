@@ -13,6 +13,7 @@ from app.database import Conversation, DerivedArtifact
 from app.llm import Citation, LiveCitation, LLMError, LLMProvider, ModelAnswer, ModelRefused
 from app.retrieval import IndexRequired, RetrievalService, RetrievalUnavailable
 from app.sessions import MemoryOutput, SessionContext, is_follow_up, load_context, normalize_question, persist_exchange, retrieval_query
+from app.style import AppliedStyle, applied_style
 
 
 router = APIRouter(tags=["Grounded chat"])
@@ -64,6 +65,7 @@ class ChatOutput(BaseModel):
     topic: str | None = None
     saved_memory_ids: list[str] = Field(default_factory=list)
     retrieval_query: str
+    style: AppliedStyle | None = None
 
 
 class ChatService:
@@ -82,7 +84,7 @@ class ChatService:
         query = retrieval_query(body.message, state)
         base = {"context": [], "summary_ids": [], "history_trimmed": False,
                 "model": None, "citations": [], "live_citations": [],
-                "live_memory_context": [], "follow_up_question": None, "retrieval_query": query}
+                "live_memory_context": [], "follow_up_question": None, "retrieval_query": query, "style": None}
         if body.remember:
             return {**base, "answer": "I've saved the information you explicitly asked me to remember as live memory.", "status": "memory_saved"}
         # New sessions can use live memory before any historical transcript is imported.
@@ -136,6 +138,8 @@ class ChatService:
                     if len(hints) == 3:
                         break
         output["summary_ids"] = [hint["id"] for hint in hints]
+        with self.retrieval.database.sessions() as session:
+            output["style"] = applied_style(session, body.profile_id)
         questions = state.questions if state else []
         follow_up_allowed = body.allow_follow_up and (state is None or state.record.revision - state.record.last_follow_up_revision >= 2)
         context = json.dumps({
@@ -145,16 +149,17 @@ class ChatService:
             "live_memory": [{"memory_id": memory.id, "text": memory.content, "source": "live",
                              "source_turn_id": memory.source_turn_id, "session_id": memory.session_id} for memory in memories],
             "follow_up_allowed": follow_up_allowed, "previous_follow_up_questions": questions,
+            "presentation_style": output["style"]["settings"] if output["style"] else None,
         }, ensure_ascii=False)
         try:
             answer = ModelAnswer.model_validate(self.provider.generate(INSTRUCTIONS, context))
         except ModelRefused:
-            return {**output, "answer": "I can't help with that request.", "status": "refused", "model": self.provider.model}
+            return {**output, "answer": "I can't help with that request.", "status": "refused", "model": self.provider.model, "style": None}
         except ValidationError as error:
             raise LLMError(502, "The model returned an invalid structured reply.") from error
         output["model"] = self.provider.model
         if answer.insufficient_evidence:
-            return {**output, "answer": UNCERTAINTY, "status": "insufficient_evidence"}
+            return {**output, "answer": UNCERTAINTY, "status": "insufficient_evidence", "style": None}
         live_allowed = {memory.id: memory.content for memory in memories}
         if (not answer.citations and not answer.live_citations) or any(
             citation.message_id not in allowed or not any(citation.quote in text for text in allowed[citation.message_id])

@@ -9,6 +9,8 @@ stores conversations in SQLite, and supports message browsing, keyword search,
 semantic retrieval, reviewable summaries and references, and JSON export.
 Chat sessions now persist turns, track a simple topic, and keep explicitly saved
 live memory separate from imported history.
+Each profile can also analyze a speaker's writing patterns and apply reviewed
+presentation settings to model replies.
 The grounded chat endpoint is implemented with an OpenAI adapter; provider behavior
 is tested with mocked HTTP responses. A live hosted-model evaluation and the
 frontend are still pending.
@@ -24,11 +26,11 @@ frontend are still pending.
 | Summaries and references | Implemented with local rules | Extractive segment summaries, participant labels, candidate topics/events, source inspection, correction and review |
 | Grounded AI replies | Implemented; provider tested with mocks | Responses API adapter, bounded evidence/history, exact-quote citation checks, uncertainty and provider failure handling |
 | Conversation continuity | Implemented; model behavior mocked | Persistent sessions/turns, topic-aware short follow-ups, question cooldown, explicit live memory and retraction |
-| Style profiles | Next | Configurable vocabulary, punctuation, and conversational patterns |
-| Web interface | Planned | React chat, transcript browsing, memory inspection |
+| Style profiles | Implemented; generation mocked | Speaker-scoped statistics, reviewed settings, prompt integration, turn snapshots, local diagnostics |
+| Web interface | Next | React chat, transcript browsing, memory inspection |
 | Deployment readiness | Planned | Authentication, access controls, operational documentation |
 
-The latest verified suite has **123 passing tests**, covering parsing, API
+The latest verified suite has **146 passing tests**, covering parsing, API
 validation, profile isolation, persistence after restart, transaction rollback,
 duplicate detection, search, and export fidelity. Retrieval tests also cover
 chunk bounds, provenance, model changes, incomplete builds, and stale indexes.
@@ -38,6 +40,8 @@ Chat tests cover prompt boundaries, unsupported questions, quote/source validati
 profile isolation, provider retries, rate limits, refusals, and configuration loading.
 Session tests cover restart persistence, concurrent writes, history/memory budgets,
 follow-up cooldowns, explicit memory provenance, retraction, and atomic saves.
+Style tests cover source scoping, bounded analysis, configuration revisions,
+stale samples, prompt/evidence separation and stored style snapshots.
 The import/search/export flow has also been checked against the running HTTP server.
 
 ## Run locally
@@ -235,6 +239,70 @@ or recent assistant text are suppressed. Set `allow_follow_up=false` to disable.
 Actual question relevance and multi-turn language quality remain unverified with
 a live model.
 
+## Configurable conversational style
+
+Style controls presentation. Evidence and citations still come from the separate
+historical/live-memory paths. Analysis runs locally and is **disabled by default**;
+it does not enable or overwrite your reviewed settings.
+
+1. Read `GET /profiles/{profile_id}/style` to obtain the current revision (0 before
+   any style has been saved).
+2. Run `POST /profiles/{profile_id}/style/analyze` using a speaker label copied
+   from imported messages:
+
+   ```json
+   {"revision": 0, "speaker": "Ali"}
+   ```
+
+3. Inspect `analysis`, `suggested_settings`, and the source message IDs. The
+   measurements include length, terminal punctuation, common words and normalized
+   repeated phrases, approximate emoji usage, lowercase habits, and script mixing.
+4. Review settings, then PATCH `/profiles/{profile_id}/style` using the new revision:
+
+   ```json
+   {
+     "revision": 1,
+     "settings": {
+       "enabled": true,
+       "length": "brief",
+       "tone": "casual",
+       "emoji_usage": "occasional"
+     }
+   }
+   ```
+
+5. Chat normally. An answered model reply reports the requested `style` revision
+   and settings; session turns retain that snapshot for inspection. To disable,
+   PATCH `{"revision":2,"settings":{"enabled":false}}` using the latest revision.
+
+Other controls include punctuation, capitalization, language, and optional preferred
+words. Values are bounded enums or individual words; there is no free-form persona
+instruction field. Settings apply across the selected profile's sessions. They can
+also be configured manually before analysis. PATCH changes only supplied fields;
+stale revisions return 409.
+
+Analysis samples at most 1,000 matching speaker records, 1,000 text characters per
+usable message, and 100,000 total text characters. Sample limitations/truncation
+are reported. Fewer than 20 usable messages are flagged as a limited sample.
+Latin/Arabic-script mixing is a rough script measure: it does not identify Urdu,
+Arabic, Roman Urdu, personality, or relationships. Unicode emoji counts are
+approximate, and phrases are normalized word sequences rather than authentic quotes.
+New imports in the analyzed scope mark analysis stale; your reviewed settings remain.
+
+`POST /profiles/{profile_id}/style/evaluate` with
+`{"text":"python practice sounds good 🙂"}` compares the supplied text's broad
+metrics with the analyzed baseline and saved settings. It checks simple length,
+emoji and lowercase bands and reports preferred-word presence. It makes no model
+call, does not change the profile, and does not score tone, language identity,
+semantic similarity, or factual grounding.
+
+Only enabled, reviewed settings reach the generation prompt. Raw style samples,
+statistics, phrases and the analyzed speaker's name are not forwarded as style
+context. Optional vocabulary is a diction hint, not evidence or permission to add
+facts. Citation quotes are never rewritten for style. Fixed uncertainty, refusal
+and memory-save messages remain neutral. Style similarity of actual hosted-model
+replies is still unverified; tests use mocked generation and synthetic comparisons.
+
 ## Summaries and reference review
 
 This checkpoint needs no API key or model download. It uses **extractive
@@ -320,6 +388,9 @@ the parser refuses to overwrite files.
 | GET | `/profiles/{profile_id}/sessions/{session_id}/turns` | Browse saved turns with pagination |
 | GET | `/profiles/{profile_id}/live-memories` | Browse user-stated memories, optionally filtered by `active` |
 | PATCH | `/profiles/{profile_id}/live-memories/{memory_id}` | Retract or reactivate a live memory |
+| GET / PATCH | `/profiles/{profile_id}/style` | Inspect or update reviewed style settings using revisions |
+| POST | `/profiles/{profile_id}/style/analyze` | Measure a selected speaker, optionally scoped by `conversation_id` |
+| POST | `/profiles/{profile_id}/style/evaluate` | Compare supplied text with saved settings and baseline metrics |
 
 ## Tests
 
@@ -363,6 +434,7 @@ Echo/
 │   │   ├── chat.py              # Prompt context and citation validation
 │   │   ├── llm.py               # Provider interface, OpenAI adapter, settings
 │   │   ├── sessions.py          # Persistent turns, live memory, topic/revision handling
+│   │   ├── style.py             # Writing statistics, settings, and local comparison
 │   │   ├── prompts/             # Grounding instructions
 │   │   ├── database.py          # SQLAlchemy schema and SQLite connections
 │   │   ├── retrieval.py         # Chunking, embeddings, and vector snapshots
@@ -379,8 +451,8 @@ Echo/
 
 ## Current limits and next steps
 
-- Session continuity and explicit live memory are implemented with mocked model
-  coverage. **Next: configurable conversational style profiles**. Hosted-model
+- The backend now includes session continuity, live memory and reviewed style
+  controls with mocked generation coverage. **Next: the React web interface**. Hosted-model
   evaluation remains pending until credentials are configured locally.
 - Semantic results rank similarity; scores are not evidence that an answer is
   true. `min_score` can suppress weak matches but cannot reliably detect every
