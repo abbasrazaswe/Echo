@@ -728,4 +728,27 @@ differences; treat the numbers as inspection aids, not a likeness score.
 Run `python -m pytest -q` for analysis/scoping, revisions, settings review,
 staleness, bounds, prompt/evidence separation and immutable turn snapshots. Actual
 hosted-model style quality remains untested because generation still uses mocks.
-The next milestone is the React chat and memory-inspection frontend.
+## Ninth checkpoint — browser workspace
+
+The React/Vite/TypeScript workspace now lives in `../frontend`. Start this backend
+on `127.0.0.1:8001`, then run `npm ci` and `npm run dev` from that directory.
+Open <http://127.0.0.1:5173/>. Vite proxies the existing `/profiles`, `/chat`, and
+`/health` routes; API contracts and server-side credential handling are unchanged.
+
+The interface creates/selects profiles and persistent sessions, displays stored
+turns and citation quotes, reads WhatsApp `.txt` exports into the existing JSON
+import endpoint, builds the index explicitly, browses/searches original messages,
+and retracts/restores explicit live memory. A missing key produces a visible error
+and preserves the chat draft. Revision conflicts reload stored turns before retry.
+Saving an explicit memory continues to work without a provider or index.
+
+The frontend has 8 mocked-network regression tests and passes the TypeScript/build
+check. The backend suite remains at 146 passing tests. Real local browser checks
+covered sessions, explicit memory, persistence, browsing/search, and indexing;
+no hosted model request was made. The native upload chooser could not be automated;
+file reading/submission is tested in the component suite and imports separately
+through HTTP. See [frontend learning guide](../frontend/README.md).
+
+Style and artifact-review panels are the next UI checkpoint. Authentication,
+access controls, backups/deletion documentation, and production serving remain
+future deployment-readiness work. Keep both development servers on loopback.

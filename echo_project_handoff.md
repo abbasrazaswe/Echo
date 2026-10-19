@@ -375,14 +375,18 @@ Protect endpoints before exposing the application beyond localhost. Add authenti
 **Exit criterion:** The application can apply a configurable conversational style without confusing generated content with transcript evidence.
 
 ### Milestone 9 — Frontend
-- [ ] Initialize React, Vite, and TypeScript
-- [ ] Build the chat interface
-- [ ] Add loading, error, and empty states
-- [ ] Connect the frontend to the FastAPI backend
-- [ ] Add transcript search and memory inspection
-- [ ] Display source context where useful
+- [x] Initialize React, Vite, and TypeScript
+- [x] Build the chat interface
+- [x] Add loading, error, and empty states
+- [x] Connect the frontend to the FastAPI backend
+- [x] Add transcript search and memory inspection
+- [x] Display source context where useful
 
 **Exit criterion:** A user can chat with a selected profile and inspect the memories used to answer.
+
+Implementation note (2026-10-19): the first React workspace is connected locally.
+Provider-generated UI behavior uses mocked network tests; a live hosted-model
+evaluation is pending. Style/artifact web editors remain follow-up work.
 
 ### Milestone 10 — Quality and deployment readiness
 - [ ] Add automated tests for parsing, retrieval, and APIs

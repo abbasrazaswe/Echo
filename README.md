@@ -4,7 +4,8 @@ Echo is a conversational AI project being built step by step. Its goal is to
 answer questions using imported conversation history and apply a configurable
 conversational style through retrieval-augmented generation (RAG).
 
-**Current stage:** a working local backend that parses WhatsApp text exports,
+**Current stage:** a local React workspace connected to a working FastAPI backend.
+The backend parses WhatsApp text exports,
 stores conversations in SQLite, and supports message browsing, keyword search,
 semantic retrieval, reviewable summaries and references, and JSON export.
 Chat sessions now persist turns, track a simple topic, and keep explicitly saved
@@ -12,8 +13,10 @@ live memory separate from imported history.
 Each profile can also analyze a speaker's writing patterns and apply reviewed
 presentation settings to model replies.
 The grounded chat endpoint is implemented with an OpenAI adapter; provider behavior
-is tested with mocked HTTP responses. A live hosted-model evaluation and the
-frontend are still pending.
+is tested with mocked HTTP responses. The frontend supports profile selection,
+saved chat sessions, transcript file import and browsing, explicit indexing,
+citation inspection, and live-memory review. A live hosted-model evaluation
+remains pending.
 
 ## Progress
 
@@ -27,10 +30,13 @@ frontend are still pending.
 | Grounded AI replies | Implemented; provider tested with mocks | Responses API adapter, bounded evidence/history, exact-quote citation checks, uncertainty and provider failure handling |
 | Conversation continuity | Implemented; model behavior mocked | Persistent sessions/turns, topic-aware short follow-ups, question cooldown, explicit live memory and retraction |
 | Style profiles | Implemented; generation mocked | Speaker-scoped statistics, reviewed settings, prompt integration, turn snapshots, local diagnostics |
-| Web interface | Next | React chat, transcript browsing, memory inspection |
+| Web interface | Implemented locally | React/Vite/TypeScript, persistent chat, .txt import, indexing, transcript search, source quotes, live-memory retraction |
 | Deployment readiness | Planned | Authentication, access controls, operational documentation |
 
-The latest verified suite has **146 passing tests**, covering parsing, API
+The latest verified suites have **146 backend tests and 8 frontend tests passing**.
+The frontend suite covers explicit saves, source display, retraction, provider
+errors, conflict refresh, file-to-JSON import, browsing queries, and API errors/paging.
+The backend suite covers parsing, API
 validation, profile isolation, persistence after restart, transaction rollback,
 duplicate detection, search, and export fidelity. Retrieval tests also cover
 chunk bounds, provenance, model changes, incomplete builds, and stale indexes.
@@ -71,6 +77,55 @@ ChromaDB. The first nonempty index build downloads the model (about 79 MB);
 subsequent builds and searches can run offline with the cached files. Message
 text is embedded locally. Chroma's anonymized telemetry is disabled. Chat sends
 selected context to OpenAI when configured.
+
+## Open the web interface
+
+Keep the backend running on port **8001**. In a second terminal, from the
+repository root (Node.js 22.12+; tested with Node 24):
+
+```sh
+cd frontend
+npm ci
+npm run dev
+```
+
+Open [Echo workspace](http://127.0.0.1:5173/). Vite forwards API requests to
+FastAPI on the same browser origin. This is a local development setup; it is
+not a published deployment. The backend still serves its API docs on port 8001.
+
+1. Create or select a profile, then click **New chat**.
+2. Try a statement such as “I prefer studying in the evening”, select
+   **Save this message as live memory**, and save it. This uses no model key.
+3. Open **Memory** to inspect, retract, or restore the saved statement. Reload
+   the page to see that the selected profile, session, and stored turns return.
+4. Choose **Import transcript**, select a WhatsApp `.txt` export, check the date
+   order, and import. Click **Build search index** after every new import.
+5. Open **Transcript** to browse the original messages and search their words.
+6. Ask a question in chat. Hosted model replies require server configuration;
+   errors preserve your draft. Use **Inspect sources** below a cited reply to
+   read the quoted evidence and distinguish historical messages from live memory.
+
+Only profile/session IDs are saved in localStorage. Transcripts, turns, and
+memories remain in backend storage; no API key belongs in the frontend.
+The UI displays saved source quotes and identifiers, rather than full surrounding
+source records. Style settings and artifact review are currently available through
+the API docs; their dedicated web panels are a follow-up checkpoint.
+
+```sh
+cd frontend
+npm test          # 8 UI/API-client regression tests; mocked network responses
+npm run build     # TypeScript checks and production assets in frontend/dist
+npm run preview   # Local build preview, still needs backend on port 8001
+```
+
+Browser checks verified real profile/session creation, local memory save and
+retraction, restoration after reload, transcript browsing/search, and index rebuild.
+The fictional transcript was imported through HTTP; file selection/import behavior
+is covered by the component test. The automated browser file chooser timed out,
+so a full native file-picker round trip is not claimed. Mobile (390 px) and wide
+(1440 px) layouts were checked for horizontal overflow. No hosted model was called.
+
+For a learning guide to the React components, see [frontend/README.md](frontend/README.md).
 
 ## Try the current workflow
 
@@ -445,15 +500,24 @@ Echo/
 │   ├── requirements.txt
 │   ├── requirements-dev.txt
 │   └── README.md                # Detailed walkthrough and parser behavior
+├── frontend/
+│   ├── src/App.tsx              # Profile selection and creation
+│   ├── src/Workspace.tsx        # Sessions, chat, and source quotes
+│   ├── src/Tools.tsx            # File import, transcript browsing, live memory
+│   ├── src/api.ts               # Typed requests, errors, and pagination
+│   ├── src/styles.css           # Responsive workspace styling
+│   ├── src/*.test.*             # UI and API-client regression tests
+│   ├── vite.config.ts          # Local API proxy and test setup
+│   └── README.md               # Frontend setup and learning guide
 ├── echo_project_handoff.md      # Design and development roadmap
 └── README.md
 ```
 
 ## Current limits and next steps
 
-- The backend now includes session continuity, live memory and reviewed style
-  controls with mocked generation coverage. **Next: the React web interface**. Hosted-model
-  evaluation remains pending until credentials are configured locally.
+- The first React workspace is implemented. **Next: web panels for reviewing style
+  settings and derived artifacts**, followed by deployment-readiness work.
+  Hosted-model evaluation remains pending until credentials are configured locally.
 - Semantic results rank similarity; scores are not evidence that an answer is
   true. `min_score` can suppress weak matches but cannot reliably detect every
   question without an answer. Validate retrieval on your own examples before RAG.
@@ -462,14 +526,15 @@ Echo/
 - Indexing is explicit and synchronous. New imports or an embedding-model change
   require rebuilding; a missing/stale index returns HTTP 409. Model or vector-store
   failures return 503. SQLite remains the source of truth.
-- Import currently accepts transcript text in JSON, up to 2,000,000 characters.
-  File upload and PDF parsing are not implemented.
+- The web interface reads `.txt` exports and submits transcript text as JSON,
+  up to 2,000,000 characters (client file cap: 8 MB). Multipart upload and PDF
+  parsing are not implemented.
 - The parser supports common export layouts. Validate a small redacted real
   sample before importing a full history; locale-specific formats and pasted
   header-shaped text may need additional handling.
 - Duplicate detection covers whole transcripts, ignoring BOM and newline-style
   differences. Partially overlapping exports are not deduplicated.
-- This is a local development backend. Authentication is not implemented; keep
+- This is a local development app. Authentication is not implemented; keep
   it bound to `127.0.0.1` until access controls are added.
 - Keep private transcripts, generated exports, databases, credentials, and virtual
   environments out of Git. Store private data under `backend/data/profiles/`,
