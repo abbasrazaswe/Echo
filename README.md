@@ -15,7 +15,8 @@ presentation settings to model replies.
 The grounded chat endpoint is implemented with an OpenAI adapter; provider behavior
 is tested with mocked HTTP responses. The frontend supports profile selection,
 saved chat sessions, transcript file import and browsing, explicit indexing,
-citation inspection, and live-memory review. A live hosted-model evaluation
+citation inspection, live-memory review, style settings, and source-backed
+summary/reference review. A live hosted-model evaluation
 remains pending.
 
 ## Progress
@@ -30,12 +31,15 @@ remains pending.
 | Grounded AI replies | Implemented; provider tested with mocks | Responses API adapter, bounded evidence/history, exact-quote citation checks, uncertainty and provider failure handling |
 | Conversation continuity | Implemented; model behavior mocked | Persistent sessions/turns, topic-aware short follow-ups, question cooldown, explicit live memory and retraction |
 | Style profiles | Implemented; generation mocked | Speaker-scoped statistics, reviewed settings, prompt integration, turn snapshots, local diagnostics |
-| Web interface | Implemented locally | React/Vite/TypeScript, persistent chat, .txt import, indexing, transcript search, source quotes, live-memory retraction |
+| Web interface | Implemented locally | React/Vite/TypeScript, persistent chat, .txt import, indexing, transcript search, source quotes, live-memory retraction, style and artifact review |
 | Deployment readiness | Planned | Authentication, access controls, operational documentation |
 
-The latest verified suites have **146 backend tests and 8 frontend tests passing**.
+The latest verified suites have **146 backend tests and 18 frontend tests passing**.
 The frontend suite covers explicit saves, source display, retraction, provider
 errors, conflict refresh, file-to-JSON import, browsing queries, and API errors/paging.
+Review-panel tests cover explicit style enablement, suggestion/draft separation,
+local diagnostics, stale analysis, scoped generation, linked evidence, corrections,
+confirm/reject payloads, revision conflicts, validation failures, and unsaved-edit guards.
 The backend suite covers parsing, API
 validation, profile isolation, persistence after restart, transaction rollback,
 duplicate detection, search, and export fidelity. Retrieval tests also cover
@@ -108,12 +112,12 @@ not a published deployment. The backend still serves its API docs on port 8001.
 Only profile/session IDs are saved in localStorage. Transcripts, turns, and
 memories remain in backend storage; no API key belongs in the frontend.
 The UI displays saved source quotes and identifiers, rather than full surrounding
-source records. Style settings and artifact review are currently available through
-the API docs; their dedicated web panels are a follow-up checkpoint.
+source records. The **Style** and **Review** tabs expose the existing style and
+artifact APIs; the API docs remain available for full endpoint inspection.
 
 ```sh
 cd frontend
-npm test          # 8 UI/API-client regression tests; mocked network responses
+npm test          # 18 UI/API-client regression tests; mocked network responses
 npm run build     # TypeScript checks and production assets in frontend/dist
 npm run preview   # Local build preview, still needs backend on port 8001
 ```
@@ -124,6 +128,32 @@ The fictional transcript was imported through HTTP; file selection/import behavi
 is covered by the component test. The automated browser file chooser timed out,
 so a full native file-picker round trip is not claimed. Mobile (390 px) and wide
 (1440 px) layouts were checked for horizontal overflow. No hosted model was called.
+
+### Review style and derived records
+
+- **Style:** enter a participant's exact transcript label and choose the analysis
+  scope. Analysis saves measured patterns and suggestions, leaving your settings
+  draft unchanged. Copy suggestions into the draft if useful, review the controls,
+  explicitly select enablement, and click **Save reviewed settings**. Manual settings
+  also work without analysis. The local sample checker uses the saved revision,
+  not the unsaved draft; it does not assess tone, identity, or factual accuracy.
+- **Review:** choose a conversation scope and generate summaries/references using
+  local rules. Filter by record kind or status, open a record, and inspect current
+  linked source messages alongside the original generated content/evidence. Confirm
+  or reject the saved record, or edit content/source IDs and save a correction.
+  Corrections preserve original transcript messages and original generated records.
+  Confirm/reject are disabled while edits are unsaved.
+- **Conflicts:** both panels submit the revision they loaded. A 409 keeps the local
+  edits and blocks another write until you deliberately reload the latest saved
+  record. Reload buttons explicitly discard local edits; writes are never retried
+  automatically. Switching panels discards their unsaved drafts too.
+
+These panels use no hosted model calls. Direct HTTP checks with a fictional
+transcript verified analysis, explicit style enablement, sample diagnostics,
+revision conflicts, source inspection, corrections, and preservation on regeneration.
+Automated visual checks for this checkpoint remain pending: the browser tool's
+URL security policy blocked access to the local page. Component tests and the
+TypeScript/build check pass; no replacement browser path was used.
 
 For a learning guide to the React components, see [frontend/README.md](frontend/README.md).
 
@@ -504,6 +534,9 @@ Echo/
 │   ├── src/App.tsx              # Profile selection and creation
 │   ├── src/Workspace.tsx        # Sessions, chat, and source quotes
 │   ├── src/Tools.tsx            # File import, transcript browsing, live memory
+│   ├── src/StylePanel.tsx       # Analysis, reviewed settings, local diagnostics
+│   ├── src/ArtifactPanel.tsx    # Source inspection, generation, record review
+│   ├── src/reviewTypes.ts       # Typed style/artifact API contracts
 │   ├── src/api.ts               # Typed requests, errors, and pagination
 │   ├── src/styles.css           # Responsive workspace styling
 │   ├── src/*.test.*             # UI and API-client regression tests
@@ -515,8 +548,9 @@ Echo/
 
 ## Current limits and next steps
 
-- The first React workspace is implemented. **Next: web panels for reviewing style
-  settings and derived artifacts**, followed by deployment-readiness work.
+- The React workspace now includes style and derived-record review panels.
+  **Next: quality and deployment readiness** (authentication, operational logging,
+  backup/deletion procedures, and reproducible deployment configuration).
   Hosted-model evaluation remains pending until credentials are configured locally.
 - Semantic results rank similarity; scores are not evidence that an answer is
   true. `min_score` can suppress weak matches but cannot reliably detect every

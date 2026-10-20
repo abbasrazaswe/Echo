@@ -3,6 +3,8 @@ import type { FormEvent } from "react";
 import { api, allPages, allSessions, ApiError, errorText } from "./api";
 import type { Profile, Session, Turn, Citation } from "./api";
 import Tools from "./Tools";
+import StylePanel from "./StylePanel";
+import ArtifactPanel from "./ArtifactPanel";
 
 export default function Workspace({
   profile,
@@ -16,20 +18,21 @@ export default function Workspace({
   const [session, setSession] = useState<Session | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [busy, setBusy] = useState(false);
+  const [reviewBusy, setReviewBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [remember, setRemember] = useState(false);
-  const [tab, setTab] = useState<"sources" | "history" | "memory" | "import">(
-    "sources",
-  );
+  const [tab, setTab] = useState<
+    "sources" | "history" | "memory" | "import" | "style" | "review"
+  >("sources");
   const [citations, setCitations] = useState<Citation[]>([]);
   const [refresh, setRefresh] = useState(0);
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    onBusy(busy || loading);
+    onBusy(busy || loading || reviewBusy);
     return () => onBusy(false);
-  }, [busy, loading, onBusy]);
+  }, [busy, loading, reviewBusy, onBusy]);
   useEffect(() => {
     const controller = new AbortController();
     allSessions(`${base}/sessions`, controller.signal)
@@ -155,7 +158,11 @@ export default function Workspace({
           <p className="eyebrow">YOUR WORKSPACE / {profile.name}</p>
           <h1>Conversations, with context.</h1>
         </div>
-        <button className="secondary" onClick={() => setTab("import")}>
+        <button
+          className="secondary"
+          disabled={reviewBusy}
+          onClick={() => setTab("import")}
+        >
           ↥ Import transcript
         </button>
       </header>
@@ -297,20 +304,28 @@ export default function Workspace({
         </section>
         <aside className="inspector">
           <nav className="tabs" aria-label="Workspace tools">
-            {(["sources", "history", "memory", "import"] as const).map(
-              (item) => (
-                <button
-                  key={item}
-                  aria-pressed={tab === item}
-                  className={tab === item ? "active" : ""}
-                  onClick={() => setTab(item)}
-                >
-                  {item === "history"
-                    ? "Transcript"
-                    : item[0].toUpperCase() + item.slice(1)}
-                </button>
-              ),
-            )}
+            {(
+              [
+                "sources",
+                "history",
+                "memory",
+                "import",
+                "style",
+                "review",
+              ] as const
+            ).map((item) => (
+              <button
+                key={item}
+                disabled={reviewBusy}
+                aria-pressed={tab === item}
+                className={tab === item ? "active" : ""}
+                onClick={() => setTab(item)}
+              >
+                {item === "history"
+                  ? "Transcript"
+                  : item[0].toUpperCase() + item.slice(1)}
+              </button>
+            ))}
           </nav>
           <div className="inspector-body">
             {tab === "sources" ? (
@@ -347,6 +362,10 @@ export default function Workspace({
                   </div>
                 )}
               </>
+            ) : tab === "style" ? (
+              <StylePanel base={base} onBusy={setReviewBusy} />
+            ) : tab === "review" ? (
+              <ArtifactPanel base={base} onBusy={setReviewBusy} />
             ) : (
               <Tools key={`${tab}-${refresh}`} tab={tab} base={base} />
             )}

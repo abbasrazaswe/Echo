@@ -714,3 +714,89 @@ main {
     transition: none !important;
   }
 }
+
+/* Review panels reuse the workspace's forms and evidence cards. */
+.tabs {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 0;
+}
+.tabs button {
+  flex: 1 0 30%;
+}
+.stack textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+.analysis-summary,
+.artifact-detail {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid #d5ddce;
+}
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.metrics dt {
+  font-size: 0.62rem;
+  color: #72836f;
+}
+.metrics dd {
+  margin: 4px 0;
+  font-size: 1.25rem;
+}
+.inspector details {
+  margin: 16px 0;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+.inspector summary {
+  cursor: pointer;
+  color: #426e55;
+}
+.review-filters {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+.review-filters label {
+  min-width: 0;
+  flex: 1;
+  font-size: 0.72rem;
+}
+.review-filters select {
+  margin-top: 6px;
+}
+.artifact-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.artifact-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-weight: 400;
+  background: #fffdf7;
+  border: 1px solid #d8dfd0;
+}
+.artifact-choice.selected {
+  border-color: #50774a;
+  background: #edf1e5;
+}
+.review-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.review-actions button {
+  flex: 1;
+  white-space: normal;
+}

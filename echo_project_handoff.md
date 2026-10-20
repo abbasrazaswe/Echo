@@ -386,7 +386,14 @@ Protect endpoints before exposing the application beyond localhost. Add authenti
 
 Implementation note (2026-10-19): the first React workspace is connected locally.
 Provider-generated UI behavior uses mocked network tests; a live hosted-model
-evaluation is pending. Style/artifact web editors remain follow-up work.
+evaluation is pending.
+
+Follow-up (2026-10-21): reviewed style settings and artifact-review panels are now
+implemented. They show analysis/candidate provenance, require explicit saves,
+preserve drafts on conflicts, and expose local diagnostics, corrections, and
+confirm/reject workflows. Verification: 146 backend and 18 frontend tests plus
+TypeScript/build and real HTTP smoke checks. Browser visual QA for the new panels
+was blocked by browser URL security policy. Next is Milestone 10.
 
 ### Milestone 10 — Quality and deployment readiness
 - [ ] Add automated tests for parsing, retrieval, and APIs

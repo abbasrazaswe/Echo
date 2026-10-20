@@ -742,13 +742,39 @@ and retracts/restores explicit live memory. A missing key produces a visible err
 and preserves the chat draft. Revision conflicts reload stored turns before retry.
 Saving an explicit memory continues to work without a provider or index.
 
-The frontend has 8 mocked-network regression tests and passes the TypeScript/build
+The first frontend checkpoint had 8 mocked-network regression tests and passes the TypeScript/build
 check. The backend suite remains at 146 passing tests. Real local browser checks
 covered sessions, explicit memory, persistence, browsing/search, and indexing;
 no hosted model request was made. The native upload chooser could not be automated;
 file reading/submission is tested in the component suite and imports separately
 through HTTP. See [frontend learning guide](../frontend/README.md).
 
-Style and artifact-review panels are the next UI checkpoint. Authentication,
-access controls, backups/deletion documentation, and production serving remain
-future deployment-readiness work. Keep both development servers on loopback.
+## Tenth checkpoint — style and artifact review in the browser
+
+The **Style** tab analyzes an exact participant label in a selected scope, shows
+bounded/stale sample information, and keeps suggestions separate from the editable
+settings. Copying suggestions never enables an inactive style. Saving reviewed
+settings sends the current revision; sample checks use the saved revision and make
+no provider call. Manual configuration works without analysis or imports.
+
+The **Review** tab generates summaries/references, filters/paginates records,
+shows current and original generated evidence, and supports confirm, reject,
+content correction, and same-conversation source-ID corrections. Unsaved edits
+block confirm/reject until saved as a correction or explicitly discarded.
+Regeneration preserves reviewed records. Existing API contracts are unchanged.
+
+Both panels retain drafts on validation errors and revision conflicts. A conflict
+blocks further writes until an explicit reload discards local edits and loads the
+latest database revision. No automatic retry is made. Switching panels discards
+unsaved drafts; navigation/profile switches are locked during review writes.
+
+Verification: **146 backend tests and 18 frontend tests pass**, plus TypeScript
+validation and the production build. Direct HTTP smoke checks with fictional data
+verified style analysis, explicit enablement, local checks, artifact sources,
+correction, stale writes, and reviewed-record preservation. The browser tool's URL
+security policy blocked visual QA for these panels. Hosted-model behavior remains
+mocked; no hosted model request was made.
+
+Next is quality and deployment readiness: authentication/access controls, structured
+logging, backups/deletion procedures, and reproducible deployment. Keep both
+development servers on loopback until those controls exist.

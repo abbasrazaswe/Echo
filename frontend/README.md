@@ -91,9 +91,13 @@ labelled as imported message or live memory. It does not display the whole
 surrounding transcript or treat a quote as a guarantee of factual correctness.
 Saved quotes describe the evidence at reply time; memories may later be retracted.
 
-Eight tests cover explicit memory requests, stored-turn display, source quotes,
+Eighteen tests cover explicit memory requests, stored-turn display, source quotes,
 retraction, provider failure drafts, conflict revisions, file-to-JSON submission,
 browsing without an empty query, error normalization, and multi-page evidence.
+Review tests additionally cover explicit style enablement, retained drafts, stale
+analysis, diagnostics, generation scope, artifact filtering/paging, source-backed
+corrections, confirm/reject payloads, conflicts, invalid source IDs, and unsaved
+correction guards.
 They use jsdom and mocked fetch. The native file-picker round trip remains
 unverified by browser automation because its chooser timed out. File reading
 and submission are covered in the component test (jsdom requires dispatching
@@ -105,6 +109,56 @@ The fictional import was submitted separately over HTTP. Responsive checks at
 390 and 1440 px found no horizontal overflow; no browser errors were reported.
 No hosted model call was made.
 
-**Next learning step:** add web panels for the existing reviewed style settings
-and derived-artifact workflows, then authentication and operational readiness.
-Those endpoints are already available in the backend API docs.
+## Reviewed style and derived records
+
+Open **Style** to load the saved settings and a separate editable draft.
+Analyze a participant using their exact imported label (e.g. `Sara`) and an
+optional conversation scope. Analysis writes a new revision with metrics and
+suggestions. It does not enable style or replace the draft. Small/truncated
+samples and stale analyses are labelled. Review the measured words/phrases and
+copy the suggestions to the draft only if useful. Copying preserves the draft's
+current enable switch; it never enables style for you.
+
+Edit length, tone, punctuation, emoji use, capitalization, language, and preferred
+words. Select **Enable reviewed style for future replies** explicitly and save.
+Preferred words must be individual words (maximum 10), not instructions. You can
+configure style manually without any imported transcript. **Check sample** makes
+local checks against the saved revision; unsaved changes are excluded. It neither
+stores the sample nor calls a model, and does not establish identity or accuracy.
+
+Open **Review** to generate extractive summaries, participant labels, candidate
+topics, and candidate events. Conversation scope controls generation and browsing;
+kind/status filters and pagination control the list. Generating again refreshes
+pending records but preserves records already reviewed. No model is needed.
+
+Select a record and read the current linked messages, including source lines and
+IDs. Expand the original generated record to compare it with a correction. You
+can confirm or reject the saved record, or edit its text and source IDs then save
+a correction. The source IDs must belong to the same conversation (1–100 IDs,
+validated by the server). Copy message IDs exactly, one per line; full record
+inspection is also available in the API docs. Confirm/reject are disabled when
+corrections are unsaved, so edits cannot be silently ignored.
+
+`StylePanel.tsx` and `ArtifactPanel.tsx` keep the loaded revision beside the draft.
+`reviewTypes.ts` describes the existing API data. A stale write returns 409: edits
+stay visible, writes stop, and a clearly labelled reload button lets you discard
+local edits and load the latest saved record. There is no automatic retry or
+silent merge. Leaving a panel discards its unsaved draft. Navigation/profile
+switches are disabled during review mutations; chat refreshes do not remount an
+open review panel.
+
+The lesson is the same as in chat: **the draft is editable screen state; saving
+creates a reviewed database revision**. An original message, an extractive
+candidate, and a reviewed correction remain distinct records. Source messages
+are never rewritten to match a style or correction.
+
+Direct HTTP smoke checks with a fictional transcript verified the real style
+analysis/save/evaluate and artifact generation/inspect/correction APIs, including
+stale-revision errors and preservation of reviewed records. The 18 component/client
+tests use mocked fetch. Browser automation for these new panels was blocked by
+the browser tool's URL security policy, so their visual/browser QA remains
+unverified. Earlier browser checks above apply to the previous workspace checkpoint.
+No hosted model was called.
+
+**Next learning step:** authentication, logging, backups/deletion documentation,
+and reproducible local/remote operation before exposing the app beyond loopback.
