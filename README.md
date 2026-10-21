@@ -1,3 +1,6 @@
+## Echo
+
+
 Echo is a conversational AI project being built step by step. Its goal is to
 answer questions using imported conversation history and apply a configurable
 conversational style through retrieval-augmented generation (RAG).
