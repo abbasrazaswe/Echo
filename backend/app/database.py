@@ -31,10 +31,11 @@ class Conversation(Base):
     profile_id: Mapped[str] = mapped_column(ForeignKey("profiles.id"), index=True)
     title: Mapped[str]
     source_hash: Mapped[str]
-    date_order: Mapped[str]
+    date_order: Mapped[str | None]
+    transcript_format: Mapped[str] = mapped_column(default="whatsapp", server_default="whatsapp")
     message_count: Mapped[int]
-    started_at: Mapped[datetime]
-    ended_at: Mapped[datetime]
+    started_at: Mapped[datetime | None]
+    ended_at: Mapped[datetime | None]
 
 
 class Message(Base):
@@ -45,8 +46,8 @@ class Message(Base):
     sequence_number: Mapped[int]
     speaker: Mapped[str | None]
     text: Mapped[str] = mapped_column(Text)
-    timestamp: Mapped[datetime]
-    raw_timestamp: Mapped[str]
+    timestamp: Mapped[datetime | None]
+    raw_timestamp: Mapped[str | None]
     message_type: Mapped[str]
     source_type: Mapped[str]
     source_line_start: Mapped[int]
@@ -56,6 +57,7 @@ class Message(Base):
 
 class Database:
     def __init__(self, path: Path):
+        self.path = path.resolve()
         path.parent.mkdir(parents=True, exist_ok=True)
         self.engine = create_engine(
             URL.create("sqlite", database=str(path.resolve())),
@@ -69,6 +71,8 @@ class Database:
         self.sessions = sessionmaker(self.engine, expire_on_commit=False)
 
     def initialize(self) -> None:
+        from app.migrations import allow_undated
+        allow_undated(self.engine, self.path)
         Base.metadata.create_all(self.engine)
 
 

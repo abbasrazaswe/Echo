@@ -1,16 +1,17 @@
 """Profile creation, transactional imports, and historical message browsing."""
 
 from hashlib import sha256
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import Conversation, Message, Profile
 from app.parser.whatsapp import DateOrder, MessageRecord, ParseError, parse_whatsapp
+from app.parser.labelled import parse_labelled
 from app.retrieval import IndexRequired, RetrievalUnavailable
 
 
@@ -40,14 +41,26 @@ class ImportInput(BaseModel):
         min_length=1, max_length=2_000_000,
         examples=["14/10/2026, 09:01 - Ali: Shall we study Python?\n14/10/2026, 09:02 - Sara: Yes, let's start with functions."],
     )
-    date_order: DateOrder
+    transcript_format: Literal["whatsapp", "speaker-labelled"] = "whatsapp"
+    date_order: DateOrder | None = None
+    speakers: list[str] = Field(default_factory=list, max_length=50)
+
+    @model_validator(mode="after")
+    def validate_format(self):
+        if self.transcript_format == "whatsapp":
+            if self.date_order is None or self.speakers:
+                raise ValueError("WhatsApp imports need date_order and no participant label list.")
+        elif self.date_order is not None or not self.speakers:
+            raise ValueError("Undated imports need participant labels and no date_order.")
+        return self
 
 
 class ConversationOutput(BaseModel):
     id: str
     profile_id: str
     title: str
-    date_order: DateOrder
+    date_order: DateOrder | None
+    transcript_format: Literal["whatsapp", "speaker-labelled"]
     message_count: int
 
 
@@ -128,14 +141,16 @@ def import_transcript(profile_id: str, body: ImportInput, session: SessionDepend
     if session.scalar(duplicate_query):
         raise HTTPException(409, "This transcript is already imported into this profile")
     try:
-        records = parse_whatsapp(normalized, date_order=body.date_order)
+        records = (parse_labelled(normalized, speakers=body.speakers) if body.transcript_format == "speaker-labelled"
+                   else parse_whatsapp(normalized, date_order=body.date_order))
     except ParseError as error:
         raise HTTPException(422, str(error)) from error
+    dated = [record.timestamp for record in records if record.timestamp is not None]
     conversation = Conversation(
         profile_id=profile_id, title=body.title, source_hash=digest,
-        date_order=body.date_order, message_count=len(records),
-        started_at=min(record.timestamp for record in records),
-        ended_at=max(record.timestamp for record in records),
+        date_order=body.date_order, transcript_format=body.transcript_format, message_count=len(records),
+        started_at=min(dated) if dated else None,
+        ended_at=max(dated) if dated else None,
     )
     try:
         session.add(conversation)

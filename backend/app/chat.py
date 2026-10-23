@@ -123,7 +123,7 @@ class ChatService:
                 allowed.setdefault(source.id, []).append(text)
                 evidence.append({
                     "message_id": source.id, "speaker": (source.speaker or "Unknown")[:80],
-                    "timestamp": source.timestamp.isoformat(), "text": text,
+                    "timestamp": source.timestamp.isoformat() if source.timestamp else None, "text": text,
                     "start_char": span["start_char"], "end_char": span["end_char"],
                 })
         hints = []

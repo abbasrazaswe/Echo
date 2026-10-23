@@ -33,7 +33,7 @@ def create_app(
         finally:
             database.engine.dispose()
 
-    application = FastAPI(title="Echo API", version="0.7.0", lifespan=lifespan)
+    application = FastAPI(title="Echo API", version="0.8.0", lifespan=lifespan)
     application.include_router(router)
     application.include_router(artifact_router)
     application.include_router(chat_router)

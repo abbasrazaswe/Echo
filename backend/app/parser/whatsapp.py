@@ -26,10 +26,10 @@ class MessageRecord(BaseModel):
     sequence_number: int = Field(ge=1)
     speaker: str | None
     text: str
-    timestamp: datetime
-    raw_timestamp: str
+    timestamp: datetime | None
+    raw_timestamp: str | None
     message_type: Literal["message", "system"]
-    source_type: Literal["whatsapp_export"] = "whatsapp_export"
+    source_type: Literal["whatsapp_export", "speaker_labelled"] = "whatsapp_export"
     source_line_start: int = Field(ge=1)
     source_line_end: int = Field(ge=1)
     raw_record: str

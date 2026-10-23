@@ -168,7 +168,7 @@ test("imports selected text with explicit date order and surfaces the rebuild st
   Object.defineProperty(file, "text", {
     value: async () => "14/10/2026, 09:01 - Ali: Study Python",
   });
-  await user.upload(screen.getByLabelText("WhatsApp text export"), file);
+  await user.upload(screen.getByLabelText("Transcript text file"), file);
   await user.selectOptions(screen.getByLabelText("Date order"), "month-first");
   // jsdom reports required file inputs invalid even after userEvent.upload.
   // Dispatch the form submission to exercise Echo's actual File.text/JSON flow.
@@ -203,4 +203,38 @@ test("browse omits an empty keyword so FastAPI returns all original messages", a
   expect(
     new URL(String(request[0]), "http://localhost").searchParams.has("q"),
   ).toBe(false);
+});
+
+test("undated import sends explicit labels without an invented date order", async () => {
+  const user = await openChat();
+  await user.click(screen.getByRole("button", { name: "↥ Import transcript" }));
+  await user.selectOptions(
+    screen.getByLabelText("Transcript format"),
+    "speaker-labelled",
+  );
+  expect(screen.queryByLabelText("Date order")).not.toBeInTheDocument();
+  const text = "Sara:\nStudy Python\nAli:\nA checklist:\nPractice functions";
+  const file = new File([text], "undated.txt", { type: "text/plain" });
+  Object.defineProperty(file, "text", { value: async () => text });
+  await user.upload(screen.getByLabelText("Transcript text file"), file);
+  expect(
+    screen.getByRole("button", { name: "Import transcript" }),
+  ).toBeDisabled();
+  await user.type(
+    screen.getByLabelText("Participant labels (one per line, without colons)"),
+    "Sara\nAli",
+  );
+  fireEvent.submit(
+    screen.getByRole("button", { name: "Import transcript" }).closest("form")!,
+  );
+  await screen.findByRole("status");
+  const request = fetchMock.mock.calls.find(([path]) =>
+    String(path).endsWith("/imports"),
+  )!;
+  expect(JSON.parse(request[1]!.body as string)).toEqual({
+    title: "undated",
+    transcript: text,
+    transcript_format: "speaker-labelled",
+    speakers: ["Sara", "Ali"],
+  });
 });

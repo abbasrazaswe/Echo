@@ -20,6 +20,8 @@ export default function Tools({
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [dateOrder, setDateOrder] = useState("day-first");
+  const [format, setFormat] = useState("whatsapp");
+  const [speakers, setSpeakers] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -86,7 +88,15 @@ export default function Tools({
         );
       await api(`${base}/imports`, {
         title: title.trim(),
-        date_order: dateOrder,
+        ...(format === "whatsapp"
+          ? { date_order: dateOrder }
+          : {
+              transcript_format: "speaker-labelled",
+              speakers: speakers
+                .split(/\r?\n/)
+                .map((label) => label.trim())
+                .filter(Boolean),
+            }),
         transcript,
       });
       setConversations(await api<Conversation[]>(`${base}/conversations`));
@@ -125,10 +135,24 @@ export default function Tools({
       {tab === "import" ? (
         <>
           <p className="muted">
-            Export a WhatsApp chat without media and choose the .txt file. Dates
-            must match your export’s format.
+            Choose a WhatsApp export or an undated transcript with standalone
+            participant labels. Undated imports preserve file order; dates stay
+            unknown.
           </p>
           <form className="stack" onSubmit={importFile}>
+            <label>
+              Transcript format
+              <select
+                value={format}
+                disabled={busy}
+                onChange={(e) => setFormat(e.target.value)}
+              >
+                <option value="whatsapp">WhatsApp export (dated)</option>
+                <option value="speaker-labelled">
+                  Speaker-labelled text (undated)
+                </option>
+              </select>
+            </label>
             <label>
               Transcript title
               <input
@@ -140,7 +164,7 @@ export default function Tools({
               />
             </label>
             <label>
-              WhatsApp text export
+              Transcript text file
               <input
                 required
                 type="file"
@@ -156,20 +180,45 @@ export default function Tools({
                 }}
               />
             </label>
-            <label>
-              Date order
-              <select
-                value={dateOrder}
-                onChange={(e) => setDateOrder(e.target.value)}
-                disabled={busy}
-              >
-                <option value="day-first">Day first · 14/10/2026</option>
-                <option value="month-first">Month first · 10/14/2026</option>
-              </select>
-            </label>
+            {format === "whatsapp" ? (
+              <label>
+                Date order
+                <select
+                  value={dateOrder}
+                  onChange={(e) => setDateOrder(e.target.value)}
+                  disabled={busy}
+                >
+                  <option value="day-first">Day first · 14/10/2026</option>
+                  <option value="month-first">Month first · 10/14/2026</option>
+                </select>
+              </label>
+            ) : (
+              <>
+                <label>
+                  Participant labels (one per line, without colons)
+                  <textarea
+                    required
+                    value={speakers}
+                    disabled={busy}
+                    onChange={(e) => setSpeakers(e.target.value)}
+                  />
+                </label>
+                <p className="muted small">
+                  Example: a line containing Sara: starts Sara’s message. Enter
+                  every exact participant label above. Only those standalone
+                  labels split messages; other lines remain message text. A
+                  matching label inside a message is inherently ambiguous.
+                </p>
+              </>
+            )}
             <button
               className="primary"
-              disabled={busy || !file || !title.trim()}
+              disabled={
+                busy ||
+                !file ||
+                !title.trim() ||
+                (format !== "whatsapp" && !speakers.trim())
+              }
             >
               {busy ? "Working…" : "Import transcript"}
             </button>
@@ -287,7 +336,7 @@ export default function Tools({
                 <time>
                   {row.timestamp
                     ? new Date(row.timestamp).toLocaleDateString()
-                    : "Unknown date"}
+                    : "Date unknown"}
                 </time>
               </div>
               <p>{row.text}</p>

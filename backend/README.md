@@ -778,3 +778,60 @@ mocked; no hosted model request was made.
 Next is quality and deployment readiness: authentication/access controls, structured
 logging, backups/deletion procedures, and reproducible deployment. Keep both
 development servers on loopback until those controls exist.
+
+
+## Undated transcript checkpoint — API 0.8.0
+
+Use the existing import route with a second explicit format:
+
+```json
+{
+  "title": "Fictional undated notes",
+  "transcript_format": "speaker-labelled",
+  "speakers": ["Sara", "Ali"],
+  "transcript": "Sara:\nStudy Python.\nA checklist:\nPractice functions\n\nAli:\nGood idea."
+}
+```
+
+Omit `date_order` for undated input; WhatsApp imports still require it and default
+to `transcript_format: "whatsapp"`. `speakers` is required only for undated input:
+1–50 exact labels, each at most 200 characters, without colons. Unused/invalid
+labels and content before the first known label return 422 without saving anything.
+
+The undated layout has a standalone `Name:` label and body text on subsequent
+lines. Only configured labels split messages. An ordinary colon-ending content
+line stays in the current message; matching speaker-label content is inherently
+ambiguous. Inline `Name: text` is not recognized as an undated boundary. Empty
+source messages are preserved, then excluded by the existing retrieval/style
+usability rules. No dates are fabricated: `timestamp`, `raw_timestamp`, and the
+conversation's date range/date order are null. `source_type` is `speaker_labelled`.
+Export, browsing, retrieval context, artifact provenance, style analysis, and chat
+all accept these records. Model context explicitly treats null dates as unknown.
+
+The JSON export CLI supports the same format:
+
+```sh
+python -m app.parser sample.txt --format speaker-labelled \
+  --speaker Sara --speaker Ali --output data/profiles/undated.json
+```
+
+Output files still cannot overwrite the input or an existing export.
+
+### Existing SQLite databases
+
+Startup detects the legacy non-null timestamp schema. A consistent SQLite backup
+is created beside the database as `echo.pre-undated-<id>.db` before changes.
+The transactional migration makes timestamps/date order optional and adds the
+conversation format with `whatsapp` as the legacy default. It preserves existing
+rows, unique/foreign-key constraints, indexes, and triggers. A foreign-key check
+runs before commit; errors roll back the whole upgrade. Repeated startup does not
+repeat a successful upgrade or create more backups. Keep backups private under
+the ignored `data/profiles/` directory. Fresh databases use the new schema directly.
+
+Verification: **163 backend tests and 19 frontend tests pass** with a successful
+TypeScript/production build. New tests cover undated parsing and source fidelity,
+Unicode/multiline/blank messages, validation/duplicates/isolation, restart persistence,
+export/indexing/artifacts/style, mocked grounded chat, CLI export, and legacy
+migration backup/rollback/idempotence. A private user-provided file was validated
+only in memory; its contents are not fixtures, committed data, or hosted-model input.
+Browser visual QA remains pending under the previously reported URL-policy block.

@@ -6,7 +6,7 @@ answer questions using imported conversation history and apply a configurable
 conversational style through retrieval-augmented generation (RAG).
 
 **Current stage:** a local React workspace connected to a working FastAPI backend.
-The backend parses WhatsApp text exports,
+The backend parses WhatsApp exports and explicit undated speaker-labelled text,
 stores conversations in SQLite, and supports message browsing, keyword search,
 semantic retrieval, reviewable summaries and references, and JSON export.
 Chat sessions now persist turns, track a simple topic, and keep explicitly saved
@@ -25,7 +25,7 @@ remains pending.
 | Checkpoint | Status | What works |
 | --- | --- | --- |
 | Backend foundation | Complete | FastAPI server, health endpoint, interactive API docs, Python dependencies |
-| Transcript parsing | Implemented and tested with fictional samples | Common WhatsApp text formats, explicit date order, multiline messages, Unicode, system notices, source lines, JSON export |
+| Transcript parsing | Implemented and tested | Dated WhatsApp exports and explicit undated speaker labels, multiline text, Unicode, source lines, JSON export |
 | Structured storage | Implemented and tested | Profiles, transactional imports, SQLite persistence, duplicate protection, pagination, keyword search, conversation export |
 | Semantic retrieval | Implemented and smoke-evaluated | Local embeddings, bounded context chunks, persistent ChromaDB indexes, source-linked results, stale-index detection |
 | Summaries and references | Implemented with local rules | Extractive segment summaries, participant labels, candidate topics/events, source inspection, correction and review |
@@ -35,9 +35,12 @@ remains pending.
 | Web interface | Implemented locally | React/Vite/TypeScript, persistent chat, .txt import, indexing, transcript search, source quotes, live-memory retraction, style and artifact review |
 | Deployment readiness | Planned | Authentication, access controls, operational documentation |
 
-The latest verified suites have **146 backend tests and 18 frontend tests passing**.
+The latest verified suites have **163 backend tests and 19 frontend tests passing**.
 The frontend suite covers explicit saves, source display, retraction, provider
 errors, conflict refresh, file-to-JSON import, browsing queries, and API errors/paging.
+Undated tests cover explicit boundaries, unknown dates, empty source messages,
+provenance, legacy database migration/backup/rollback, export, retrieval, artifacts,
+style, mocked chat, and CLI export.
 Review-panel tests cover explicit style enablement, suggestion/draft separation,
 local diagnostics, stale analysis, scoped generation, linked evidence, corrections,
 confirm/reject payloads, revision conflicts, validation failures, and unsaved-edit guards.
@@ -103,8 +106,9 @@ not a published deployment. The backend still serves its API docs on port 8001.
    **Save this message as live memory**, and save it. This uses no model key.
 3. Open **Memory** to inspect, retract, or restore the saved statement. Reload
    the page to see that the selected profile, session, and stored turns return.
-4. Choose **Import transcript**, select a WhatsApp `.txt` export, check the date
-   order, and import. Click **Build search index** after every new import.
+4. Choose **Import transcript**, select the transcript format and `.txt` file,
+   then set the date order for WhatsApp or exact participant labels for undated
+   text. Import and click **Build search index** after every new import.
 5. Open **Transcript** to browse the original messages and search their words.
 6. Ask a question in chat. Hosted model replies require server configuration;
    errors preserve your draft. Use **Inspect sources** below a cited reply to
@@ -118,7 +122,7 @@ artifact APIs; the API docs remain available for full endpoint inspection.
 
 ```sh
 cd frontend
-npm test          # 18 UI/API-client regression tests; mocked network responses
+npm test          # 19 UI/API-client regression tests; mocked network responses
 npm run build     # TypeScript checks and production assets in frontend/dist
 npm run preview   # Local build preview, still needs backend on port 8001
 ```
@@ -129,6 +133,41 @@ The fictional transcript was imported through HTTP; file selection/import behavi
 is covered by the component test. The automated browser file chooser timed out,
 so a full native file-picker round trip is not claimed. Mobile (390 px) and wide
 (1440 px) layouts were checked for horizontal overflow. No hosted model was called.
+
+### Import speaker-labelled text without dates
+
+In **Import**, choose **Speaker-labelled text (undated)**. Choose your `.txt` file
+and enter every participant label exactly as it appears, one per line **without
+its trailing colon**. For example, enter `Sara` and `Ali` for this fictional file:
+
+```text
+Sara:
+Shall we study Python?
+A checklist:
+Practice functions
+
+Ali:
+Good idea.
+```
+
+Only standalone lines matching the configured labels plus `:` begin a message;
+`A checklist:` stays inside Sara's text. Inline `Sara: message` is not this format.
+Matching participant-label lines inside message content are inherently ambiguous;
+review the imported messages before indexing. Empty source messages are retained
+and skipped by retrieval/style analysis. File order, raw records, and source lines
+are preserved. Timestamps and raw timestamps are `null`, shown as **Date unknown**.
+No dates or elapsed times are inferred, including in model context.
+
+API imports use `transcript_format: "speaker-labelled"`, `speakers: ["Sara", "Ali"]`,
+and no `date_order`. Existing WhatsApp requests remain valid with `date_order` and
+an omitted format. Duplicate detection still covers the whole normalized file in
+one profile; selecting different labels does not create a second copy.
+
+On first startup with an older SQLite database, Echo creates a local
+`backend/data/profiles/echo.pre-undated-<id>.db` backup, then upgrades the schema
+transactionally. Historical records, constraints, indexes, and triggers are
+preserved; failure rolls back the upgrade. Backups contain private data and remain
+under the same Git-ignored directory. Fresh databases need no migration backup.
 
 ### Review style and derived records
 
@@ -523,6 +562,7 @@ Echo/
 │   │   ├── style.py             # Writing statistics, settings, and local comparison
 │   │   ├── prompts/             # Grounding instructions
 │   │   ├── database.py          # SQLAlchemy schema and SQLite connections
+│   │   ├── migrations.py        # Backed-up SQLite upgrade for unknown dates
 │   │   ├── retrieval.py         # Chunking, embeddings, and vector snapshots
 │   │   └── parser/              # WhatsApp parser and command-line entry point
 │   ├── tests/                   # Parser and storage/API tests, fictional fixture
@@ -564,7 +604,7 @@ Echo/
 - The web interface reads `.txt` exports and submits transcript text as JSON,
   up to 2,000,000 characters (client file cap: 8 MB). Multipart upload and PDF
   parsing are not implemented.
-- The parser supports common export layouts. Validate a small redacted real
+- The parsers support common WhatsApp layouts and explicit undated labels. Validate a small redacted real
   sample before importing a full history; locale-specific formats and pasted
   header-shaped text may need additional handling.
 - Duplicate detection covers whole transcripts, ignoring BOM and newline-style

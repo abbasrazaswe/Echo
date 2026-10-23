@@ -91,13 +91,14 @@ labelled as imported message or live memory. It does not display the whole
 surrounding transcript or treat a quote as a guarantee of factual correctness.
 Saved quotes describe the evidence at reply time; memories may later be retracted.
 
-Eighteen tests cover explicit memory requests, stored-turn display, source quotes,
+Nineteen tests cover explicit memory requests, stored-turn display, source quotes,
 retraction, provider failure drafts, conflict revisions, file-to-JSON submission,
 browsing without an empty query, error normalization, and multi-page evidence.
 Review tests additionally cover explicit style enablement, retained drafts, stale
 analysis, diagnostics, generation scope, artifact filtering/paging, source-backed
 corrections, confirm/reject payloads, conflicts, invalid source IDs, and unsaved
-correction guards.
+correction guards. An import-form regression also checks explicit undated labels
+and omission of date order.
 They use jsdom and mocked fetch. The native file-picker round trip remains
 unverified by browser automation because its chooser timed out. File reading
 and submission are covered in the component test (jsdom requires dispatching
@@ -154,7 +155,7 @@ are never rewritten to match a style or correction.
 
 Direct HTTP smoke checks with a fictional transcript verified the real style
 analysis/save/evaluate and artifact generation/inspect/correction APIs, including
-stale-revision errors and preservation of reviewed records. The 18 component/client
+stale-revision errors and preservation of reviewed records. The 19 component/client
 tests use mocked fetch. Browser automation for these new panels was blocked by
 the browser tool's URL security policy, so their visual/browser QA remains
 unverified. Earlier browser checks above apply to the previous workspace checkpoint.
@@ -162,3 +163,28 @@ No hosted model was called.
 
 **Next learning step:** authentication, logging, backups/deletion documentation,
 and reproducible local/remote operation before exposing the app beyond loopback.
+
+
+## Undated speaker-labelled text
+
+The import form now offers **WhatsApp export (dated)** and **Speaker-labelled
+text (undated)**. For undated text, the date-order field is replaced by participant
+labels, one per line without colons. Enter every exact label from the file. For
+`Sara:` followed on the next line by text, enter `Sara`; a second participant
+`Ali:` needs another entry `Ali`. Do not enter example names if your file has
+different labels.
+
+Only exact, standalone label lines delimit messages. Other colon-ending text
+stays within the message. A standalone configured label inside body text is
+ambiguous, so inspect the resulting transcript before indexing. Inline
+`Sara: Hello` does not match the supported undated layout.
+
+The request includes `transcript_format: "speaker-labelled"` and `speakers`, with
+no date order. The API preserves source lines, file order, blank source messages,
+and raw records; missing dates are `null` and displayed as **Date unknown**. The
+model prompt is told those dates are unknown. No private input file is shipped
+with this feature or its tests.
+
+Existing databases are backed up and upgraded on backend startup. If you had
+an older server running, restart it before importing with the new form. Rebuild
+the semantic index after a successful import as usual.

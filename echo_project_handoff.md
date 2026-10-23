@@ -448,3 +448,14 @@ The first usable version is complete when a user can:
 7. Keep new chat memories separate from the imported historical record.
 
 The priority is reliable parsing and retrieval first; advanced agents, knowledge graphs, and deployment can follow after the core flow works.
+
+
+### Implemented follow-up: explicitly undated transcripts
+
+API 0.8.0 and the import form now accept speaker-labelled text with an explicit
+participant list. Source dates stay unknown; source lines/raw records/file order
+are preserved. Existing dated data receives a backed-up, transactional SQLite
+schema upgrade. Verification: 163 backend and 19 frontend tests, production build,
+fictional HTTP import/export, and private input validation in memory. No private
+transcript fixture or hosted model call was used. Deployment-readiness work is
+still the next planned milestone.
