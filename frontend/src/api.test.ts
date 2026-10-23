@@ -39,3 +39,44 @@ test("reads all pages without dropping older evidence", async () => {
     "/memories?active=true&limit=200&offset=200",
   );
 });
+
+test("API failures carry a validated request reference for reporting", async () => {
+  const reference = "a".repeat(32);
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ detail: "Try again" }), {
+          status: 503,
+          headers: { "X-Request-ID": reference },
+        }),
+      ),
+  );
+  const { errorText } = await import("./api");
+  try {
+    await api("/chat", {});
+  } catch (error) {
+    expect(error).toMatchObject({ requestId: reference, status: 503 });
+    expect(errorText(error)).toContain(`Request reference: ${reference}`);
+    return;
+  }
+  throw new Error("Expected failure");
+});
+
+test("untrusted or malformed reference headers are not displayed", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        new Response("{}", {
+          status: 500,
+          headers: { "X-Request-ID": "untrusted-value" },
+        }),
+      ),
+  );
+  await expect(api("/chat", {})).rejects.toMatchObject({
+    requestId: undefined,
+  });
+});

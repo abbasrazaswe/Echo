@@ -396,13 +396,15 @@ TypeScript/build and real HTTP smoke checks. Browser visual QA for the new panel
 was blocked by browser URL security policy. Next is Milestone 10.
 
 ### Milestone 10 — Quality and deployment readiness
-- [ ] Add automated tests for parsing, retrieval, and APIs
-- [ ] Add structured logging
-- [ ] Validate uploads and file sizes
-- [ ] Ensure secrets and private data are excluded from Git
-- [ ] Document installation and configuration
+- [x] Add automated tests for parsing, retrieval, and APIs
+- [x] Add structured logging
+- [x] Validate uploads and file sizes
+- [x] Ensure secrets and private data are excluded from Git
+- [x] Document installation and configuration
 - [ ] Add authentication and access controls before remote deployment
 - [ ] Document backups and data deletion
+
+- [x] Run backend/frontend checks in GitHub Actions
 
 **Exit criterion:** The app is reproducible locally, tested on representative cases, and has documented security and operational limitations.
 
@@ -459,3 +461,14 @@ schema upgrade. Verification: 163 backend and 19 frontend tests, production buil
 fictional HTTP import/export, and private input validation in memory. No private
 transcript fixture or hosted model call was used. Deployment-readiness work is
 still the next planned milestone.
+
+
+### Quality follow-up: request diagnostics and CI
+
+API 0.9.0 adds generated request references, allowlisted JSON request metadata,
+safe unexpected-error responses, and redacted server/retrieval error output.
+The web client displays request references on errors. Main pushes and pull
+requests run independent backend/frontend jobs with pinned actions and no hosted
+model credentials. Local verification: 173 backend tests, 21 frontend tests,
+`pip check`, and production build. Authentication, backup/deletion tooling, and
+remote deployment configuration remain unfinished Milestone 10 work.

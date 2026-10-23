@@ -182,7 +182,7 @@ class RetrievalService:
                         pass  # A failed cache cleanup must not hide the original error.
                 if isinstance(error, IndexRequired):
                     raise
-                logger.exception("Semantic index build failed for profile %s", profile_id)
+                logger.error("Semantic index build failed (details redacted); see the HTTP request reference.")
                 raise RetrievalUnavailable("Indexing failed; source messages and the previous index are unchanged.") from error
 
     def search(self, profile_id: str, query: str, limit: int, min_score: float) -> dict:
@@ -221,5 +221,5 @@ class RetrievalService:
             except IndexRequired:
                 raise
             except Exception as error:
-                logger.exception("Semantic query failed for profile %s", profile_id)
+                logger.error("Semantic query failed (details redacted); see the HTTP request reference.")
                 raise RetrievalUnavailable("Semantic search is unavailable. Check the model cache and rebuild the index.") from error

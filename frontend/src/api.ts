@@ -52,6 +52,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public requestId?: string,
   ) {
     super(message);
   }
@@ -88,7 +89,12 @@ export async function api<T>(
         : Array.isArray(detail)
           ? detail.map((item: { msg: string }) => item.msg).join("; ")
           : `Request failed (${response.status}).`;
-    throw new ApiError(response.status, message);
+    const reference = response.headers.get("X-Request-ID");
+    throw new ApiError(
+      response.status,
+      message,
+      reference && /^[a-f0-9]{32}$/.test(reference) ? reference : undefined,
+    );
   }
   return data as T;
 }
@@ -128,4 +134,8 @@ export async function allSessions(
 }
 
 export const errorText = (error: unknown) =>
-  error instanceof Error ? error.message : "Something went wrong. Try again.";
+  error instanceof ApiError && error.requestId
+    ? `${error.message} Request reference: ${error.requestId}`
+    : error instanceof Error
+      ? error.message
+      : "Something went wrong. Try again.";

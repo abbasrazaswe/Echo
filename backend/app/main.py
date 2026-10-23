@@ -1,13 +1,15 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from app.api import router
 from app.artifact_api import router as artifact_router
 from app.chat import ChatService, router as chat_router
 from app.database import Database
 from app.llm import LLMProvider, LLMSettings, OpenAIProvider
+from app.observability import RequestLoggingMiddleware, configure_request_logging
 from app.retrieval import EmbeddingProvider, RetrievalService
 from app.sessions import router as session_router
 from app.style import router as style_router
@@ -22,6 +24,7 @@ def create_app(
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):
+        configure_request_logging()
         database = Database(database_path)
         database.initialize()
         application.state.database = database
@@ -33,12 +36,21 @@ def create_app(
         finally:
             database.engine.dispose()
 
-    application = FastAPI(title="Echo API", version="0.8.0", lifespan=lifespan)
+    application = FastAPI(title="Echo API", version="0.9.0", lifespan=lifespan)
+    application.add_middleware(RequestLoggingMiddleware)
     application.include_router(router)
     application.include_router(artifact_router)
     application.include_router(chat_router)
     application.include_router(session_router)
     application.include_router(style_router)
+
+    @application.exception_handler(Exception)
+    async def unexpected_error(request: Request, _error: Exception):
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Unexpected server error. Please retry or report the request reference."},
+            headers={"X-Request-ID": request.state.request_id},
+        )
 
     @application.get("/health")
     async def health() -> dict[str, str]:

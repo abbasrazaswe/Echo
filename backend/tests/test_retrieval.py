@@ -232,3 +232,22 @@ def test_import_during_build_does_not_publish_outdated_snapshot(semantic_client)
     embedder.embed = import_during_embedding
     assert build(client, pid).status_code == 409
     assert search(client, pid).status_code == 409
+
+
+@pytest.mark.parametrize('operation', ['build', 'search'])
+def test_provider_errors_do_not_log_profile_ids_or_source_text(semantic_client, caplog, operation):
+    client, embedder = semantic_client
+    pid = profile(client)
+    ingest(client, pid, 'Fictional source for privacy test')
+    if operation == 'search':
+        assert build(client, pid).status_code == 200
+    def fail(texts):
+        raise RuntimeError('private-source-content from '+pid)
+    embedder.embed = fail
+    caplog.clear()
+    response = build(client, pid) if operation == 'build' else search(client, pid)
+    assert response.status_code == 503
+    assert response.headers['X-Request-ID']
+    assert 'details redacted' in caplog.text
+    assert 'private-source-content' not in caplog.text and pid not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)

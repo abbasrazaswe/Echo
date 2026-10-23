@@ -91,7 +91,7 @@ labelled as imported message or live memory. It does not display the whole
 surrounding transcript or treat a quote as a guarantee of factual correctness.
 Saved quotes describe the evidence at reply time; memories may later be retracted.
 
-Nineteen tests cover explicit memory requests, stored-turn display, source quotes,
+Twenty-one tests cover explicit memory requests, stored-turn display, source quotes,
 retraction, provider failure drafts, conflict revisions, file-to-JSON submission,
 browsing without an empty query, error normalization, and multi-page evidence.
 Review tests additionally cover explicit style enablement, retained drafts, stale
@@ -155,7 +155,7 @@ are never rewritten to match a style or correction.
 
 Direct HTTP smoke checks with a fictional transcript verified the real style
 analysis/save/evaluate and artifact generation/inspect/correction APIs, including
-stale-revision errors and preservation of reviewed records. The 19 component/client
+stale-revision errors and preservation of reviewed records. The 21 component/client
 tests use mocked fetch. Browser automation for these new panels was blocked by
 the browser tool's URL security policy, so their visual/browser QA remains
 unverified. Earlier browser checks above apply to the previous workspace checkpoint.
@@ -188,3 +188,18 @@ with this feature or its tests.
 Existing databases are backed up and upgraded on backend startup. If you had
 an older server running, restart it before importing with the new form. Rebuild
 the semantic index after a successful import as usual.
+
+
+## Reporting failures and CI
+
+API errors now include a **Request reference** when the backend supplies a valid
+server-generated ID. Share that reference and the action you tried; the backend
+terminal can match it to a route/status/duration record without the transcript
+being included in the log. References are validated before display. The normal
+draft-preservation and conflict workflows are unchanged.
+
+GitHub's **Checks** workflow runs `npm ci`, `npm test`, and `npm run build` on Node
+24, alongside a separate backend job. There are now 21 frontend tests, including
+reference display and malformed-header handling. CI uses mocked providers and
+fictional inputs, with no private data or hosted-model credentials. This does not
+publish the UI or enable branch protection.

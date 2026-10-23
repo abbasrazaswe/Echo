@@ -835,3 +835,85 @@ export/indexing/artifacts/style, mocked grounded chat, CLI export, and legacy
 migration backup/rollback/idempotence. A private user-provided file was validated
 only in memory; its contents are not fixtures, committed data, or hosted-model input.
 Browser visual QA remains pending under the previously reported URL-policy block.
+
+
+## Request logging and CI — API 0.9.0
+
+Every HTTP request gets a new server-generated 32-character `X-Request-ID`.
+Responses include it, including validation errors, handled service errors, and
+unhandled 500 responses. The web interface displays validated references on API
+failures. Match that reference to the backend terminal record:
+
+```json
+{"timestamp":"2026-10-24T09:00:00+00:00","event":"http_request","request_id":"00000000000000000000000000000000","method":"GET","route":"/profiles/{profile_id}/messages","status":200,"duration_ms":4.2,"outcome":"completed"}
+```
+
+The timestamp is UTC, and duration measures application handling through response
+completion or failure. `outcome` is `completed`, `error`, or `cancelled`; a handled
+503 completes normally while retaining status 503. Cancellation before response
+headers uses diagnostic status 499; that is a log convention, not a response sent
+to a disconnected client. A failure after response headers retains the status
+already sent, with `outcome: "error"`. Unknown routes log `<unmatched>` and unknown
+methods log `OTHER`. Lifespan/WebSocket traffic does not produce HTTP records.
+
+### Privacy boundary
+
+Only the fixed fields above are logged. Route parameters stay placeholders;
+search terms, raw paths/URLs, bodies, credentials, cookies, incoming request IDs,
+client addresses, and exception messages/tracebacks are omitted. References are
+newly generated, not copied from untrusted request headers. Startup configures one
+JSON stdout handler without changing the root logger. Default `uvicorn.access`
+is disabled to prevent a parallel raw-URL log. Uvicorn's repeated ASGI exception
+tracebacks are redacted, and retrieval failures now use fixed messages without
+profile IDs or provider exception text. Unhandled errors return generic JSON and
+a matching reference, while still propagating to the ASGI server.
+
+This covers Echo's request records and the specified server/retrieval errors.
+Other third-party libraries, reverse proxies, custom handlers, shell tracing, or
+log collectors need their own privacy review. Logs go to stdout; no log database,
+retention policy, or external telemetry service is added. Treat operational logs
+as private. To investigate a failure, locate its reference, route, and status,
+then reproduce with a fictional/redacted input in a test.
+
+The middleware uses Starlette's pure ASGI interface, retaining streaming and
+exception propagation ([Starlette middleware](https://www.starlette.io/middleware/)).
+
+### Automated checks
+
+`.github/workflows/checks.yml` runs on main-branch pushes, pull requests, and
+manual dispatch. Backend and frontend jobs run independently on Ubuntu 24.04:
+
+- Python 3.12: install `requirements-dev.txt`, `pip check`, and `pytest -q`.
+- Node 24: `npm ci`, `npm test`, and `npm run build` (includes TypeScript checks).
+
+The checkout/setup actions use pinned commit hashes, the token has contents-read
+permission only, and no repository secrets are supplied. Backend tests receive
+empty hosted-model credentials and offline model-hub mode. The real embedding
+smoke-evaluation script is not run. No private database/transcript or build/test
+artifact is uploaded. This adds check runs, not branch protection or deployment.
+
+Reproduce the jobs locally from the respective directories:
+
+```sh
+# backend (activated Python environment)
+python -m pip install -r requirements-dev.txt
+python -m pip check
+HF_HUB_OFFLINE=1 OPENAI_API_KEY='' LLM_MODEL='' python -m pytest -q
+```
+
+```sh
+# frontend
+npm ci
+npm test
+npm run build
+```
+
+Local verification: **173 backend tests and 21 frontend tests pass**, plus
+`pip check` and the production build. Logging regressions cover references and
+field allowlisting, sensitive bodies/headers/queries/IDs, safe 500 responses,
+exception propagation, setup idempotence, concurrent requests, cancellation,
+non-HTTP passthrough, and redacted retrieval failures. Client tests cover displaying
+valid references and ignoring malformed ones. No hosted model request is made.
+
+Next: authentication/access controls, backup/deletion tooling, and deployment
+configuration. Keep the app on loopback until the remote-access controls exist.

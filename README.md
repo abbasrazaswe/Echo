@@ -33,9 +33,9 @@ remains pending.
 | Conversation continuity | Implemented; model behavior mocked | Persistent sessions/turns, topic-aware short follow-ups, question cooldown, explicit live memory and retraction |
 | Style profiles | Implemented; generation mocked | Speaker-scoped statistics, reviewed settings, prompt integration, turn snapshots, local diagnostics |
 | Web interface | Implemented locally | React/Vite/TypeScript, persistent chat, .txt import, indexing, transcript search, source quotes, live-memory retraction, style and artifact review |
-| Deployment readiness | Planned | Authentication, access controls, operational documentation |
+| Quality and deployment readiness | In progress | Private request metadata, error references, GitHub Actions checks; authentication and backup/deletion tooling pending |
 
-The latest verified suites have **163 backend tests and 19 frontend tests passing**.
+The latest verified suites have **173 backend tests and 21 frontend tests passing**.
 The frontend suite covers explicit saves, source display, retraction, provider
 errors, conflict refresh, file-to-JSON import, browsing queries, and API errors/paging.
 Undated tests cover explicit boundaries, unknown dates, empty source messages,
@@ -122,7 +122,7 @@ artifact APIs; the API docs remain available for full endpoint inspection.
 
 ```sh
 cd frontend
-npm test          # 19 UI/API-client regression tests; mocked network responses
+npm test          # 21 UI/API-client regression tests; mocked network responses
 npm run build     # TypeScript checks and production assets in frontend/dist
 npm run preview   # Local build preview, still needs backend on port 8001
 ```
@@ -196,6 +196,30 @@ URL security policy blocked access to the local page. Component tests and the
 TypeScript/build check pass; no replacement browser path was used.
 
 For a learning guide to the React components, see [frontend/README.md](frontend/README.md).
+
+## Request references and automated checks
+
+Echo now adds an `X-Request-ID` response header. If an API request fails, the web
+interface displays that reference beside its error. Use it to find the matching
+JSON request log in the backend terminal. The log includes the method, route
+**template**, status, duration, and outcome; it excludes request/response bodies,
+queries, raw URLs, client-supplied request IDs, headers, client addresses, and
+profile/session IDs. Default Uvicorn access logging is disabled at application
+startup because it would otherwise include raw URLs. Unexpected errors return a
+generic JSON response; Uvicorn exception details and retrieval errors are redacted.
+Third-party/custom process logging is outside this request-log contract.
+
+The [Checks workflow](https://github.com/abbasrazaswe/Echo/actions/workflows/checks.yml)
+runs on pushes to `main`, pull requests, and manual dispatch. Separate jobs run
+Python 3.12 tests plus `pip check`, and Node 24 `npm ci`, UI tests, TypeScript, and
+the production build. Actions are pinned to commit hashes; workflow permissions
+are read-only. Tests use fictional input/mocked providers without credentials or
+hosted-model evaluation. CI does not deploy, upload private data, or run the
+opt-in real embedding evaluation. Repository branch-protection settings are not
+changed by adding a workflow.
+
+See [backend/README.md](backend/README.md#request-logging-and-ci--api-090) for
+log fields, privacy limits, and how to reproduce a failed CI check locally.
 
 ## Try the current workflow
 
@@ -550,6 +574,7 @@ illustrate retrieval ranking, not confidence in a historical answer.
 
 ```text
 Echo/
+├── .github/workflows/checks.yml # Backend/frontend CI checks
 ├── backend/
 │   ├── app/
 │   │   ├── main.py              # Application startup and health endpoint
@@ -563,6 +588,7 @@ Echo/
 │   │   ├── prompts/             # Grounding instructions
 │   │   ├── database.py          # SQLAlchemy schema and SQLite connections
 │   │   ├── migrations.py        # Backed-up SQLite upgrade for unknown dates
+│   │   ├── observability.py     # Private request metadata and error references
 │   │   ├── retrieval.py         # Chunking, embeddings, and vector snapshots
 │   │   └── parser/              # WhatsApp parser and command-line entry point
 │   ├── tests/                   # Parser and storage/API tests, fictional fixture
@@ -590,8 +616,9 @@ Echo/
 ## Current limits and next steps
 
 - The React workspace now includes style and derived-record review panels.
-  **Next: quality and deployment readiness** (authentication, operational logging,
-  backup/deletion procedures, and reproducible deployment configuration).
+  **Next: authentication/access controls and backup/deletion tooling**,
+  followed by deployment configuration. Request logging and automated CI checks
+  are implemented; public/remote deployment is still pending.
   Hosted-model evaluation remains pending until credentials are configured locally.
 - Semantic results rank similarity; scores are not evidence that an answer is
   true. `min_score` can suppress weak matches but cannot reliably detect every
